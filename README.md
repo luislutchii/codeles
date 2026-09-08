@@ -1,7 +1,7 @@
 # CodeLES - AI Coding Agent
 
 <div align="center">
-  <img src="https://raw.githubusercontent.com/luislutchii/codeles/main/docs/logo-codeles.jpg" alt="CodeLES Logo" width="120" height="120" style="border-radius: 16px;">
+  <img src="https://raw.githubusercontent.com/luislutchii/codeles/main/logo-codeles.jpg" alt="CodeLES Logo" width="120" height="120" style="border-radius: 16px;">
   
   <h1>CodeLES</h1>
   <p><strong>AI Coding Agent com 1M tokens de contexto via NVIDIA Nemotron 3 Ultra</strong></p>
