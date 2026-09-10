@@ -12,7 +12,6 @@
     <a href="https://github.com/luislutchii/codeles"><img src="https://img.shields.io/github/forks/luislutchii/codeles?style=social" alt="GitHub Forks"></a>
     <a href="https://github.com/luislutchii/codeles/issues"><img src="https://img.shields.io/github/issues/luislutchii/codeles" alt="GitHub Issues"></a>
     <a href="https://github.com/luislutchii/codeles/blob/main/LICENSE"><img src="https://img.shields.io/github/license/luislutchii/codeles" alt="License"></a>
-    <a href="https://twitter.com/les_systems"><img src="https://img.shields.io/twitter/follow/les_systems?style=social" alt="Twitter Follow"></a>
     <a href="https://instagram.com/les.systems"><img src="https://img.shields.io/badge/Instagram-%40les.systems-E4405F?logo=instagram&logoColor=white" alt="Instagram"></a>
   </p>
 </div>
@@ -28,38 +27,55 @@
 - **💾 Memória Persistente** - User memory, project memory, session memory
 - **👥 Delegação de Tarefas** - Subagentes paralelos (leaf + orchestrator)
 - **⏰ Cron Jobs** - Tarefas agendadas com linguagem natural
-- **🎨 TUI Rica** - Interface terminal com Ink (React para CLI)
+- **🎨 Interface Rica** - TUI com banner ASCII, prompt colorido, help formatado
 - **🔒 Segurança First** - Configuração via .env, .gitignore protegido
 - **📦 Monorepo TypeScript** - Packages: core, providers, tools, cli
 
 ## 📦 Instalação Rápida
 
 ```bash
-# Clone o repositório
+# 1. Clone o repositório
 git clone https://github.com/luislutchii/codeles.git
 cd codeles
 
-# Instale dependências
-npm run install:all
+# 2. Instale dependências
+npm install --workspaces --legacy-peer-deps
 
-# Configure variáveis de ambiente (opcional - NVIDIA funciona out-of-the-box)
-cp .env.example .env
-# Edite .env com suas chaves se quiser outros providers
+# 3. Build do projeto
+node build.mjs
 
-# Inicialize no seu projeto
-codeles init
+# 4. Instale globalmente (torna 'codeles' disponível em qualquer terminal)
+cd packages/cli && npm link
 
-# Comece a codificar!
+# 5. Pronto! Use em qualquer diretório
 codeles chat
 ```
 
+### 🔑 Configurar API NVIDIA (Conversas Naturais Reais)
+
+```bash
+# No diretório do CodeLES
+cd codeles
+
+# Adicione a API key da NVIDIA (Nemotron 3 Ultra - 1M tokens contexto)
+echo "NVIDIA_API_KEY=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" > .env
+
+# Agora use a IA real nas conversas
+codeles chat
+
+# Test health
+codeles doctor
+```
+
+> **Nota:** Sem API key, o CodeLES roda em **mock mode** (respostas inteligentes baseadas em palavras-chave). Com a key NVIDIA, você tem a **IA real Nemotron 3 Ultra** com 1M de tokens de contexto para conversas naturais completas.
+
 ## ⚙️ Configuração
 
-### Provider Padrão: NVIDIA Nemotron 3 Ultra (1M Context)
+### Provider Padrão: OpenRouter + Nemotron 3 Ultra (1M Context)
 
-O CodeLES vem configurado com **NVIDIA Nemotron 3 Ultra** como provider padrão - **zero configuração necessária**. Basta rodar `codeles chat` e começar.
+O CodeLES vem configurado com **OpenRouter** acessando **NVIDIA Nemotron 3 Ultra** como provider padrão - funciona out-of-the-box no mock mode.
 
-Para usar sua própria chave NVIDIA (maiores limites):
+Para usar sua própria chave NVIDIA (IA real, limites maiores):
 ```bash
 # No .env
 NVIDIA_API_KEY=nvapi-sua-chave-aqui
@@ -72,7 +88,7 @@ NVIDIA_API_KEY=nvapi-sua-chave-aqui
 codeles provider add meu-openai -t openai -k sk-... -m gpt-4o
 
 # Anthropic
-codeles provider add meu-claude -t anthropic -k sk-ant-... -m claude-3-5-sonnet
+codeles provider add meu-claude -t anthropic -k sk-ant-... -m claude-3.5-sonnet
 
 # OpenRouter (100+ modelos)
 codeles provider add openrouter -t openrouter -k sk-or-... -m anthropic/claude-3.5-sonnet
@@ -95,7 +111,7 @@ codeles provider add minha-api -t custom -k ... -u https://api.exemplo.com/v1 -m
 /model       # Lista e troca modelo
 
 # Via CLI
-codeles chat --provider openrouter --model anthropic/claude-3.5-sonnet
+codeles chat --provider openrouter --model nvidia/nemotron-3-ultra
 ```
 
 ## 🎯 Comandos Principais
@@ -170,8 +186,8 @@ codeles/
 │   ├── core/           # Config, types, memory, session, delegation
 │   ├── providers/      # Adapters: OpenAI, Anthropic, NVIDIA, etc.
 │   ├── tools/          # Terminal, Filesystem, Web, Delegation
-│   └── cli/            # Ink TUI, commands, entry point
-├── .env.example        # Template de variáveis de ambiente
+│   └── cli/            # TUI, commands, entry point
+├── .env.example        # Template de variáveis de ambiente (com NVIDIA key)
 ├── .gitignore          # Protege secrets
 └── tsconfig.json       # Config TypeScript base
 ```
@@ -179,20 +195,11 @@ codeles/
 ## 🔧 Desenvolvimento
 
 ```bash
-# Modo desenvolvimento (watch)
-npm run dev
-
 # Build completo
-npm run build
-
-# Testes
-npm run test
-
-# Lint
-npm run lint
+node build.mjs
 
 # Limpar tudo
-npm run clean
+rm -rf packages/*/dist node_modules
 ```
 
 ## 📁 Estrutura de Configuração
