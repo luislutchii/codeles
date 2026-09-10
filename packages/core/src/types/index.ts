@@ -559,7 +559,7 @@ export const DEFAULT_CONFIG: Partial<CodeLESConfig> = {
       website: 'https://lutchi.vercel.app'
     },
     defaultProvider: 'openrouter',
-    defaultModel: 'nvidia/nemotron-3-ultra',
+    defaultModel: 'nvidia/nemotron-3.5-lightning:free',
     systemPrompt: '',
     maxTokens: 8192,
     temperature: 0.7,
