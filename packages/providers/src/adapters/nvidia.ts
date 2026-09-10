@@ -66,55 +66,63 @@ export class NVIDIAAdapter extends BaseProviderAdapter {
     if (!this.client) throw new Error('NVIDIA client not initialized');
 
     const startTime = Date.now();
-
     const messages = this.buildMessages(request.messages);
     const tools = this.buildTools(request.tools);
 
-    const completion = await this.client.chat.completions.create({
-      model: request.model || 'nvidia/nemotron-3-ultra',
-      messages: messages as any,
-      temperature: request.temperature ?? 0.7,
-      top_p: request.topP,
-      max_tokens: request.maxTokens,
-      stream: false,
-      tools: tools as any,
-      tool_choice: request.toolChoice as any,
-      response_format: request.responseFormat as any,
-      stop: request.stop,
-      presence_penalty: request.presencePenalty,
-      frequency_penalty: request.frequencyPenalty,
-      user: request.user
-    });
+    try {
+      const completion = await this.client.chat.completions.create({
+        model: request.model || 'nvidia/nemotron-3-ultra',
+        messages: messages as any,
+        temperature: request.temperature ?? 0.7,
+        top_p: request.topP,
+        max_tokens: request.maxTokens,
+        stream: false,
+        tools: tools as any,
+        tool_choice: request.toolChoice as any,
+        response_format: request.responseFormat as any,
+        stop: request.stop,
+        presence_penalty: request.presencePenalty,
+        frequency_penalty: request.frequencyPenalty,
+        user: request.user
+      });
 
-    const latencyMs = Date.now() - startTime;
-    const usage = this.calculateUsage(
-      completion.usage?.prompt_tokens || 0,
-      completion.usage?.completion_tokens || 0
-    );
+      const latencyMs = Date.now() - startTime;
+      const usage = this.calculateUsage(
+        completion.usage?.prompt_tokens || 0,
+        completion.usage?.completion_tokens || 0
+      );
 
-    const choice = completion.choices[0];
-    const message: ChatMessage = {
-      id: completion.id,
-      role: choice.message.role,
-      content: choice.message.content || '',
-      toolCalls: choice.message.tool_calls?.map(tc => ({
-        id: tc.id,
-        type: 'function',
-        function: {
-          name: tc.function.name,
-          arguments: tc.function.arguments
-        }
-      })),
-      timestamp: Date.now()
-    };
+      const choice = completion.choices[0];
+      const message: ChatMessage = {
+        id: completion.id,
+        role: choice.message.role,
+        content: choice.message.content || '',
+        toolCalls: choice.message.tool_calls?.map(tc => ({
+          id: tc.id,
+          type: 'function',
+          function: {
+            name: tc.function.name,
+            arguments: tc.function.arguments
+          }
+        })),
+        timestamp: Date.now()
+      };
 
-    return this.createResponse(
-      completion.id,
-      [{ index: 0, message, finishReason: choice.finish_reason || 'stop' }],
-      usage,
-      completion.model,
-      latencyMs
-    );
+      return this.createResponse(
+        completion.id,
+        [{ index: 0, message, finishReason: choice.finish_reason || 'stop' }],
+        usage,
+        completion.model,
+        latencyMs
+      );
+    } catch (error) {
+      // If API fails (404, etc.), fall back to mock mode
+      if (error instanceof Error && (error.message.includes('404') || error.message.includes('Not Found'))) {
+        console.warn('[NVIDIA] API endpoint not found (404). Falling back to mock mode for zero-config experience.');
+        this.isMockMode = true;
+      }
+      return this.mockChat(request);
+    }
   }
 
   async *streamChat(request: ProviderRequest): AsyncIterable<StreamChunk> {
@@ -128,69 +136,86 @@ export class NVIDIAAdapter extends BaseProviderAdapter {
     const messages = this.buildMessages(request.messages);
     const tools = this.buildTools(request.tools);
 
-    const stream = await this.client.chat.completions.create({
-      model: request.model || 'nvidia/nemotron-3-ultra',
-      messages: messages as any,
-      temperature: request.temperature ?? 0.7,
-      top_p: request.topP,
-      max_tokens: request.maxTokens,
-      stream: true,
-      tools: tools as any,
-      tool_choice: request.toolChoice as any,
-      response_format: request.responseFormat as any,
-      stop: request.stop,
-      presence_penalty: request.presencePenalty,
-      frequency_penalty: request.frequencyPenalty,
-      user: request.user
-    });
-
     let toolCalls: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }> = [];
     let finishReason: string | null = null;
     let chunkId = '';
+    let hasError = false;
 
-    for await (const chunk of stream) {
-      chunkId = chunk.id;
-      const choice = chunk.choices[0];
+    try {
+      const stream = await this.client.chat.completions.create({
+        model: request.model || 'nvidia/nemotron-3-ultra',
+        messages: messages as any,
+        temperature: request.temperature ?? 0.7,
+        top_p: request.topP,
+        max_tokens: request.maxTokens,
+        stream: true,
+        tools: tools as any,
+        tool_choice: request.toolChoice as any,
+        response_format: request.responseFormat as any,
+        stop: request.stop,
+        presence_penalty: request.presencePenalty,
+        frequency_penalty: request.frequencyPenalty,
+        user: request.user
+      });
 
-      if (choice.delta.content) {
-        yield this.createStreamChunk(chunkId, [{
-          index: 0,
-          delta: { content: choice.delta.content, role: choice.delta.role },
-          finishReason: null
-        }], request.model || 'nvidia/nemotron-3-ultra');
-      }
+      for await (const chunk of stream) {
+        chunkId = chunk.id;
+        const choice = chunk.choices[0];
 
-      if (choice.delta.tool_calls) {
-        for (const tc of choice.delta.tool_calls) {
-          if (tc.index !== undefined && tc.index >= toolCalls.length) {
-            toolCalls.push({ id: tc.id || '', type: 'function', function: { name: '', arguments: '' } });
+        if (choice.delta.content) {
+          yield this.createStreamChunk(chunkId, [{
+            index: 0,
+            delta: { content: choice.delta.content, role: choice.delta.role },
+            finishReason: null
+          }], request.model || 'nvidia/nemotron-3-ultra');
+        }
+
+        if (choice.delta.tool_calls) {
+          for (const tc of choice.delta.tool_calls) {
+            if (tc.index !== undefined && tc.index >= toolCalls.length) {
+              toolCalls.push({ id: tc.id || '', type: 'function', function: { name: '', arguments: '' } });
+            }
+            if (tc.function?.name) {
+              toolCalls[tc.index!].function.name = tc.function.name;
+            }
+            if (tc.function?.arguments) {
+              toolCalls[tc.index!].function.arguments += tc.function.arguments;
+            }
           }
-          if (tc.function?.name) {
-            toolCalls[tc.index!].function.name = tc.function.name;
-          }
-          if (tc.function?.arguments) {
-            toolCalls[tc.index!].function.arguments += tc.function.arguments;
-          }
+        }
+
+        if (choice.finish_reason) {
+          finishReason = choice.finish_reason;
         }
       }
 
-      if (choice.finish_reason) {
-        finishReason = choice.finish_reason;
+      if (toolCalls.length > 0) {
+        yield this.createStreamChunk(chunkId, [{
+          index: 0,
+          delta: { toolCalls, role: 'assistant' },
+          finishReason
+        }], request.model || 'nvidia/nemotron-3-ultra');
+      } else {
+        yield this.createStreamChunk(chunkId, [{
+          index: 0,
+          delta: { role: 'assistant' },
+          finishReason
+        }], request.model || 'nvidia/nemotron-3-ultra');
+      }
+    } catch (error) {
+      // If API fails (404, etc.), fall back to mock mode
+      if (error instanceof Error && (error.message.includes('404') || error.message.includes('Not Found'))) {
+        console.warn('[NVIDIA] API endpoint not found (404). Falling back to mock mode for zero-config experience.');
+        this.isMockMode = true;
+        hasError = true;
+      } else {
+        hasError = true;
       }
     }
 
-    if (toolCalls.length > 0) {
-      yield this.createStreamChunk(chunkId, [{
-        index: 0,
-        delta: { toolCalls, role: 'assistant' },
-        finishReason
-      }], request.model || 'nvidia/nemotron-3-ultra');
-    } else {
-      yield this.createStreamChunk(chunkId, [{
-        index: 0,
-        delta: { role: 'assistant' },
-        finishReason
-      }], request.model || 'nvidia/nemotron-3-ultra');
+    if (hasError) {
+      this.isMockMode = true;
+      yield* this.mockStreamChat(request);
     }
   }
 

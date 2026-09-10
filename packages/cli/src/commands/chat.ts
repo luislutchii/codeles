@@ -4,11 +4,11 @@
 
 import { providerRegistry } from '@codeles/providers';
 import { toolRegistry } from '@codeles/tools';
-import { CodeLESConfig, ChatMessage, StreamChunk, ToolResult } from '@codeles/core';
+import { CodeLESConfig, ChatMessage, StreamChunk, ToolCall, ToolDefinition } from '@codeles/core';
 import * as readline from 'readline/promises';
 import { stdin as input, stdout as output } from 'process';
 import chalk from 'chalk';
-import boxen from 'boxen';
+import { getWelcomeBox, getPrompt, getHelpText } from '../ui/banner.js';
 
 export async function startChatSession(options: {
   model?: string;
@@ -31,17 +31,10 @@ export async function startChatSession(options: {
   // Initialize tools
   await toolRegistry.initializeAllTools();
 
-  console.log(boxen(
-    chalk.bold.cyan('CodeLES v1.0.0') + '\n' +
-    chalk.gray('AI Coding Agent with 1M Context') + '\n' +
-    chalk.gray('Powered by LES') + '\n\n' +
-    chalk.blue('Lutchi Enterprise Systems') + '\n' +
-    chalk.gray('https://lutchi.vercel.app') + '\n\n' +
-    chalk.green('Provider: ') + chalk.cyan(config.agent.defaultProvider) +
-    chalk.green(' | Model: ') + chalk.cyan(config.agent.defaultModel) + '\n' +
-    chalk.gray('Type "/help" for commands, "/exit" to quit'),
-    { padding: 1, borderStyle: 'round', borderColor: 'cyan' }
-  ));
+  // Show beautiful welcome banner
+  console.log(getWelcomeBox());
+  console.log(`  ${chalk.gray('Provider:')} ${chalk.cyan(config.agent.defaultProvider)}  ${chalk.gray('| Model:')} ${chalk.cyan(config.agent.defaultModel)}`);
+  console.log(`  ${chalk.gray('Type')} ${chalk.cyan('/help')} ${chalk.gray('for commands,')} ${chalk.cyan('/exit')} ${chalk.gray('to quit')}\n`);
 
   const rl = readline.createInterface({ input, output });
   const messages: ChatMessage[] = [];
@@ -59,7 +52,7 @@ export async function startChatSession(options: {
 
   while (isRunning) {
     try {
-      const userInput = await rl.question(chalk.cyan('\n› '));
+      const userInput = await rl.question(getPrompt(config.agent.defaultProvider, config.agent.defaultModel));
       
       if (!userInput.trim()) continue;
 
@@ -85,222 +78,150 @@ export async function startChatSession(options: {
       // Get provider adapter
       const adapter = providerRegistry.getAdapter(config.agent.defaultProvider);
       if (!adapter) {
-        console.log(chalk.red(`Provider not found: ${config.agent.defaultProvider}`));
+        console.log(chalk.red(`Provider ${config.agent.defaultProvider} not found`));
         continue;
       }
 
-      // Initialize adapter
-      const providerConfig = config.providers[config.agent.defaultProvider] || {
+      // Initialize adapter with config
+      await adapter.initialize(config.providers[config.agent.defaultProvider] || {
         name: config.agent.defaultProvider,
         type: config.agent.defaultProvider,
         enabled: true,
         priority: 10,
-        models: [],
+        apiKey: undefined,
         defaultModel: config.agent.defaultModel,
-        headers: {}
-      };
-      await adapter.initialize(providerConfig);
+        models: []
+      });
 
-      // Prepare messages for API
-      const apiMessages: ChatMessage[] = messages.map(m => ({
-        id: m.id,
-        role: m.role,
-        content: m.content,
-        toolCalls: m.toolCalls,
-        toolCallId: m.toolCalls?.[0]?.id,
-        timestamp: m.timestamp
-      }));
+      // Show thinking indicator
+      process.stdout.write(chalk.gray('\n[Thinking...]\n'));
 
-      const tools = toolRegistry.getToolDefinitions();
-
-      console.log(chalk.gray('\n[Thinking...]'));
+      // Stream response
+      let fullResponse = '';
+      let hasToolCalls = false;
+      let toolCalls: ToolCall[] = [];
 
       try {
-        // Stream response
-        let fullContent = '';
-        let toolCalls: any[] = [];
-
+        // Get tool definitions for the provider
+        const toolDefs = toolRegistry.getToolDefinitions();
+        
         for await (const chunk of adapter.streamChat({
-          messages: apiMessages,
           model: config.agent.defaultModel,
+          messages: messages.map(m => ({ role: m.role, content: m.content, id: m.id, timestamp: m.timestamp })),
           temperature: config.agent.temperature,
-          topP: config.agent.topP,
           maxTokens: config.agent.maxTokens,
-          stream: true,
-          tools: tools.length > 0 ? tools : undefined
+          tools: toolDefs,
+          stream: true
         })) {
-          const delta = chunk.choices[0]?.delta;
-          if (delta?.content) {
-            fullContent += delta.content;
-            process.stdout.write(delta.content);
+          if (chunk.choices[0]?.delta?.content) {
+            const content = chunk.choices[0].delta.content;
+            fullResponse += content;
+            process.stdout.write(content);
           }
-          if (delta?.toolCalls) {
-            toolCalls = delta.toolCalls;
+          
+          if (chunk.choices[0]?.delta?.toolCalls) {
+            hasToolCalls = true;
+            toolCalls = chunk.choices[0].delta.toolCalls;
           }
+
           if (chunk.choices[0]?.finishReason) {
-            break;
+            // Response complete
           }
         }
-
-        console.log(); // New line after streaming
-
-        // Add assistant message
-        const assistantMessage: ChatMessage = {
-          id: `msg-${Date.now()}`,
-          role: 'assistant',
-          content: fullContent,
-          timestamp: Date.now(),
-          toolCalls: toolCalls.length > 0 ? toolCalls : undefined
-        };
-        messages.push(assistantMessage);
-
-        // Execute tool calls if any
-        if (toolCalls.length > 0) {
-          for (const tc of toolCalls) {
-            try {
-              const result = await toolRegistry.executeTool(tc.function.name, JSON.parse(tc.function.arguments), {
-                session: {} as any,
-                config,
-                workingDirectory: process.cwd(),
-                environmentVariables: process.env as Record<string, string>,
-                memory: {} as any,
-                skills: {} as any
-              });
-              
-              const toolMessage: ChatMessage = {
-                id: `tool-${Date.now()}`,
-                role: 'tool',
-                content: `Tool ${tc.function.name} executed: ${result.success ? 'success' : result.error || 'failed'}`,
-                timestamp: Date.now()
-              };
-              messages.push(toolMessage);
-              
-              if (result.success) {
-                console.log(chalk.green(`✓ Tool ${tc.function.name} completed`));
-              } else {
-                console.log(chalk.red(`✗ Tool ${tc.function.name} failed: ${result.error}`));
-              }
-            } catch (toolError) {
-              console.log(chalk.red(`✗ Tool error: ${toolError}`));
-            }
-          }
-        }
-
       } catch (error) {
-        console.log(chalk.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
+        process.stdout.write(chalk.red(`\nError: ${error instanceof Error ? error.message : String(error)}\n`));
+        continue;
       }
+
+      process.stdout.write('\n');
+
+      // Add assistant message to history
+      const assistantMessage: ChatMessage = {
+        id: `msg-${Date.now()}`,
+        role: 'assistant',
+        content: fullResponse,
+        toolCalls: hasToolCalls ? toolCalls : undefined,
+        timestamp: Date.now()
+      };
+      messages.push(assistantMessage);
 
     } catch (error) {
-      if (error instanceof Error && error.message.includes('Aborted')) {
-        isRunning = false;
-      } else {
-        console.log(chalk.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
+      if (error instanceof Error && error.message === 'Aborted') {
+        break;
       }
+      console.log(chalk.red(`Error: ${error instanceof Error ? error.message : String(error)}`));
     }
   }
 
   rl.close();
-  console.log(chalk.gray('\nGoodbye!'));
+  console.log(chalk.gray('\nAté logo! 👋\n'));
 }
 
-async function handleCommand(
-  cmd: string, 
-  config: CodeLESConfig, 
-  messages: ChatMessage[],
-  rl: readline.Interface
-): Promise<string | void> {
-  const parts = cmd.slice(1).split(' ');
-  const command = parts[0];
-  const args = parts.slice(1);
+async function handleCommand(command: string, config: CodeLESConfig, messages: ChatMessage[], rl: any): Promise<string | void> {
+  const parts = command.split(' ');
+  const cmd = parts[0].toLowerCase();
 
-  switch (command) {
-    case 'help':
-      console.log(boxen(
-        chalk.bold('Available Commands:') + '\n\n' +
-        '/help          - Show this help\n' +
-        '/exit          - Exit chat\n' +
-        '/clear         - Clear conversation history\n' +
-        '/provider      - List/switch provider\n' +
-        '/model         - List/switch model\n' +
-        '/tools         - List available tools\n' +
-        '/memory        - Show memory stats\n' +
-        '/config        - Show current config',
-        { padding: 1, borderStyle: 'round', borderColor: 'cyan' }
-      ));
+  switch (cmd) {
+    case '/help':
+      console.log(getHelpText());
       break;
 
-    case 'exit':
-    case 'quit':
+    case '/exit':
       return 'exit';
 
-    case 'clear':
+    case '/clear':
       messages.length = 0;
-      if (config.agent.systemPrompt) {
-        messages.push({
-          id: 'sys',
-          role: 'system',
-          content: config.agent.systemPrompt,
-          timestamp: Date.now()
-        });
-      }
-      console.log(chalk.green('Conversation cleared'));
+      console.log(chalk.green('✓ Histórico da conversa limpo'));
       break;
 
-    case 'provider':
-      if (args[0]) {
-        const adapter = providerRegistry.getAdapter(args[0]);
-        if (adapter) {
-          config.agent.defaultProvider = args[0];
-          console.log(chalk.green(`Provider switched to: ${args[0]}`));
-        } else {
-          console.log(chalk.red(`Provider not found: ${args[0]}`));
+    case '/provider':
+      if (parts[1] === 'list') {
+        const providers = Object.keys(config.providers);
+        console.log(chalk.bold('\nProviders configurados:'));
+        for (const p of providers) {
+          const prov = config.providers[p];
+          const marker = p === config.agent.defaultProvider ? chalk.cyan(' →') : '';
+          console.log(`  ${prov.enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(p)}${marker} (${prov.type}) - ${prov.defaultModel}`);
         }
       } else {
-        const adapters = providerRegistry.listAdapters();
-        console.log(chalk.bold('Available providers:'));
-        adapters.forEach(a => {
-          const isDefault = a === config.agent.defaultProvider;
-          console.log(`  ${isDefault ? '→' : ' '} ${a}${isDefault ? ' (default)' : ''}`);
-        });
+        console.log(chalk.yellow('Uso: /provider list'));
       }
       break;
 
-    case 'model':
-      if (args[0]) {
-        config.agent.defaultModel = args[0];
-        console.log(chalk.green(`Model switched to: ${args[0]}`));
-      } else {
-        const adapter = providerRegistry.getAdapter(config.agent.defaultProvider);
-        if (adapter) {
-          const models = await adapter.listModels();
-          console.log(chalk.bold(`Models for ${config.agent.defaultProvider}:`));
-          models.forEach(m => console.log(`  ${m.id} (${m.contextWindow.toLocaleString()} ctx)`));
-        }
-      }
+    case '/model':
+      console.log(chalk.yellow('Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
+      console.log(chalk.gray('Para trocar: codeles chat --model <modelo>'));
       break;
 
-    case 'tools':
+    case '/tools':
       const tools = toolRegistry.listTools();
-      console.log(chalk.bold('Available tools:'));
-      tools.forEach(t => console.log(`  ${t.name} - ${t.description}`));
+      console.log(chalk.bold('\nFerramentas disponíveis:'));
+      for (const tool of tools) {
+        const enabled = config.tools[tool.name]?.enabled;
+        console.log(`  ${enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(tool.name)} - ${tool.description}`);
+      }
       break;
 
-    case 'memory':
-      console.log(chalk.yellow('Memory commands not fully implemented in simple chat mode'));
+    case '/memory':
+      const { createConfigManager } = await import('@codeles/core/config');
+      const manager = createConfigManager('default');
+      const cfg = await manager.load();
+      console.log(chalk.bold('\nMemória:'));
+      console.log(`  ${cfg.memory.enabled ? chalk.green('Ativada') : chalk.red('Desativada')}`);
+      console.log(`  Path: ${cfg.memory.path}`);
+      console.log(`  Max entries: ${cfg.memory.maxEntries}`);
       break;
 
-    case 'config':
-      console.log(boxen(
-        chalk.bold('Current Configuration:') + '\n\n' +
-        `Provider: ${config.agent.defaultProvider}\n` +
-        `Model: ${config.agent.defaultModel}\n` +
-        `Max Tokens: ${config.agent.maxTokens}\n` +
-        `Temperature: ${config.agent.temperature}`,
-        { padding: 1, borderStyle: 'round', borderColor: 'cyan' }
-      ));
+    case '/config':
+      console.log(chalk.bold('\nConfiguração Atual:'));
+      console.log(`  Provider: ${chalk.cyan(config.agent.defaultProvider)}`);
+      console.log(`  Modelo: ${chalk.cyan(config.agent.defaultModel)}`);
+      console.log(`  Max Tokens: ${config.agent.maxTokens}`);
+      console.log(`  Temperature: ${config.agent.temperature}`);
+      console.log(`  System Prompt: ${config.agent.systemPrompt ? 'Definido' : 'Nenhum'}`);
       break;
 
     default:
-      console.log(chalk.red(`Unknown command: ${command}. Type /help for help.`));
+      console.log(chalk.yellow(`Comando desconhecido: ${cmd}. Use /help para ver comandos disponíveis.`));
   }
 }
