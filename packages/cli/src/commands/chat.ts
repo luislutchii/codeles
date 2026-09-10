@@ -34,7 +34,7 @@ export async function startChatSession(options: {
   console.log(boxen(
     chalk.bold.cyan('CodeLES v1.0.0') + '\n' +
     chalk.gray('AI Coding Agent with 1M Context') + '\n' +
-    chalk.gray('Powered by NVIDIA Nemotron 3 Ultra') + '\n\n' +
+    chalk.gray('Powered by LES') + '\n\n' +
     chalk.blue('Lutchi Enterprise Systems') + '\n' +
     chalk.gray('https://lutchi.vercel.app') + '\n\n' +
     chalk.green('Provider: ') + chalk.cyan(config.agent.defaultProvider) +
@@ -90,10 +90,16 @@ export async function startChatSession(options: {
       }
 
       // Initialize adapter
-      const providerConfig = config.providers[config.agent.defaultProvider];
-      if (providerConfig) {
-        await adapter.initialize(providerConfig);
-      }
+      const providerConfig = config.providers[config.agent.defaultProvider] || {
+        name: config.agent.defaultProvider,
+        type: config.agent.defaultProvider,
+        enabled: true,
+        priority: 10,
+        models: [],
+        defaultModel: config.agent.defaultModel,
+        headers: {}
+      };
+      await adapter.initialize(providerConfig);
 
       // Prepare messages for API
       const apiMessages: ChatMessage[] = messages.map(m => ({

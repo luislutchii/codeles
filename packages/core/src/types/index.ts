@@ -558,7 +558,7 @@ export const DEFAULT_CONFIG: Partial<CodeLESConfig> = {
       founder: 'Luís Lutchi',
       website: 'https://lutchi.vercel.app'
     },
-    defaultProvider: 'nvidia',
+    defaultProvider: 'openrouter',
     defaultModel: 'nvidia/nemotron-3-ultra',
     systemPrompt: '',
     maxTokens: 8192,

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * CodeLES CLI - Main Entry Point
  */
@@ -22,21 +23,14 @@ program
   .option('-p, --profile <profile>', 'Configuration profile to use', 'default')
   .option('-c, --config <path>', 'Custom config file path')
   .option('--no-color', 'Disable colored output')
-  .hook('preAction', async (thisCommand) => {
+  .hook('preAction', (thisCommand) => {
     const opts = thisCommand.opts();
-    // Load config early for all commands
-    try {
-      const configManager = createConfigManager(opts.profile, opts.config);
-      await configManager.load();
-      // Store for later use
-      (global as any).codelesConfig = configManager.getConfig();
-      (global as any).codelesConfigManager = configManager;
-    } catch (error) {
-      console.error(chalk.red('Failed to load config:'), error instanceof Error ? error.message : String(error));
+    if (opts.noColor) {
+      chalk.level = 0;
     }
   });
 
-// Chat command - main interactive mode
+// Chat command
 program
   .command('chat')
   .description('Start interactive chat session with CodeLES')
@@ -47,323 +41,317 @@ program
   .option('--temperature <temp>', 'Temperature (0-2)', '0.7')
   .action(async (options) => {
     const { startChatSession } = await import('./commands/chat.js');
-    await startChatSession(options);
+    await startChatSession({
+      model: options.model,
+      provider: options.provider,
+      systemPrompt: options.systemPrompt,
+      maxTokens: options.maxTokens,
+      temperature: options.temperature
+    });
   });
 
-// Config commands
-const configCmd = program
+// Config command
+program
   .command('config')
-  .description('Manage CodeLES configuration');
+  .description('Manage CodeLES configuration')
+  .addCommand(
+    new Command('show')
+      .description('Show current configuration')
+      .action(async () => {
+        const { showConfig } = await import('./commands/config.js');
+        await showConfig();
+      })
+  )
+  .addCommand(
+    new Command('set')
+      .description('Set a configuration value')
+      .argument('<key>', 'Configuration key (e.g. agent.temperature)')
+      .argument('<value>', 'Configuration value')
+      .action(async (key, value) => {
+        const { setConfig } = await import('./commands/config.js');
+        await setConfig(key, value);
+      })
+  )
+  .addCommand(
+    new Command('get')
+      .description('Get a configuration value')
+      .argument('<key>', 'Configuration key')
+      .action(async (key) => {
+        const { getConfigValue } = await import('./commands/config.js');
+        await getConfigValue(key);
+      })
+  )
+  .addCommand(
+    new Command('reset')
+      .description('Reset configuration to defaults')
+      .action(async () => {
+        const { resetConfig } = await import('./commands/config.js');
+        await resetConfig();
+      })
+  )
+  .addCommand(
+    new Command('edit')
+      .description('Open configuration in editor')
+      .action(async () => {
+        const { editConfig } = await import('./commands/config.js');
+        await editConfig();
+      })
+  );
 
-configCmd
-  .command('show')
-  .description('Show current configuration')
-  .action(async () => {
-    const { showConfig } = await import('./commands/config.js');
-    await showConfig();
-  });
-
-configCmd
-  .command('set <key> <value>')
-  .description('Set a configuration value')
-  .action(async (key, value) => {
-    const { setConfig } = await import('./commands/config.js');
-    await setConfig(key, value);
-  });
-
-configCmd
-  .command('get <key>')
-  .description('Get a configuration value')
-  .action(async (key) => {
-    const { getConfigValue } = await import('./commands/config.js');
-    await getConfigValue(key);
-  });
-
-configCmd
-  .command('reset')
-  .description('Reset configuration to defaults')
-  .action(async () => {
-    const { resetConfig } = await import('./commands/config.js');
-    await resetConfig();
-  });
-
-configCmd
-  .command('edit')
-  .description('Open config file in editor')
-  .action(async () => {
-    const { editConfig } = await import('./commands/config.js');
-    await editConfig();
-  });
-
-// Provider commands
-const providerCmd = program
+// Provider command
+program
   .command('provider')
-  .description('Manage AI providers');
+  .description('Manage AI providers')
+  .addCommand(
+    new Command('list')
+      .description('List configured providers')
+      .action(async () => {
+        const { listProviders } = await import('./commands/provider.js');
+        await listProviders();
+      })
+  )
+  .addCommand(
+    new Command('add')
+      .description('Add a new provider')
+      .argument('<name>', 'Provider name')
+      .option('-t, --type <type>', 'Provider type (openai, anthropic, openrouter, google, nvidia, etc.)')
+      .option('-k, --api-key <key>', 'API key')
+      .option('-u, --base-url <url>', 'Base URL')
+      .option('-m, --model <model>', 'Default model')
+      .action(async (name, options) => {
+        const { addProvider } = await import('./commands/provider.js');
+        await addProvider(name, options);
+      })
+  )
+  .addCommand(
+    new Command('remove')
+      .description('Remove a provider')
+      .argument('<name>', 'Provider name')
+      .action(async (name) => {
+        const { removeProvider } = await import('./commands/provider.js');
+        await removeProvider(name);
+      })
+  )
+  .addCommand(
+    new Command('test')
+      .description('Test provider connection')
+      .argument('<name>', 'Provider name')
+      .action(async (name) => {
+        const { testProvider } = await import('./commands/provider.js');
+        await testProvider(name);
+      })
+  )
+  .addCommand(
+    new Command('models')
+      .description('List models for a provider')
+      .argument('<name>', 'Provider name')
+      .action(async (name) => {
+        const { listModels } = await import('./commands/provider.js');
+        await listModels(name);
+      })
+  );
 
-providerCmd
-  .command('list')
-  .description('List available providers')
-  .action(async () => {
-    const { listProviders } = await import('./commands/provider.js');
-    await listProviders();
-  });
-
-providerCmd
-  .command('add <name>')
-  .description('Add a new provider')
-  .option('-t, --type <type>', 'Provider type (openai, anthropic, openrouter, google, cohere, mistral, groq, together, nvidia, custom)')
-  .option('-k, --api-key <key>', 'API key')
-  .option('-u, --base-url <url>', 'Base URL (for custom providers)')
-  .option('-m, --model <model>', 'Default model')
-  .action(async (name, options) => {
-    const { addProvider } = await import('./commands/provider.js');
-    await addProvider(name, options);
-  });
-
-providerCmd
-  .command('remove <name>')
-  .description('Remove a provider')
-  .action(async (name) => {
-    const { removeProvider } = await import('./commands/provider.js');
-    await removeProvider(name);
-  });
-
-providerCmd
-  .command('test <name>')
-  .description('Test provider connection')
-  .action(async (name) => {
-    const { testProvider } = await import('./commands/provider.js');
-    await testProvider(name);
-  });
-
-providerCmd
-  .command('models <name>')
-  .description('List models for a provider')
-  .action(async (name) => {
-    const { listModels } = await import('./commands/provider.js');
-    await listModels(name);
-  });
-
-// Tools commands
-const toolsCmd = program
+// Tools command
+program
   .command('tools')
-  .description('Manage tools');
+  .description('Manage tools')
+  .addCommand(
+    new Command('list')
+      .description('List available tools')
+      .action(async () => {
+        const { listTools } = await import('./commands/tools.js');
+        await listTools();
+      })
+  )
+  .addCommand(
+    new Command('enable')
+      .description('Enable a tool')
+      .argument('<name>', 'Tool name')
+      .action(async (name) => {
+        const { enableTool } = await import('./commands/tools.js');
+        await enableTool(name);
+      })
+  )
+  .addCommand(
+    new Command('disable')
+      .description('Disable a tool')
+      .argument('<name>', 'Tool name')
+      .action(async (name) => {
+        const { disableTool } = await import('./commands/tools.js');
+        await disableTool(name);
+      })
+  );
 
-toolsCmd
-  .command('list')
-  .description('List available tools')
-  .action(async () => {
-    const { listTools } = await import('./commands/tools.js');
-    await listTools();
-  });
-
-toolsCmd
-  .command('enable <name>')
-  .description('Enable a tool')
-  .action(async (name) => {
-    const { enableTool } = await import('./commands/tools.js');
-    await enableTool(name);
-  });
-
-toolsCmd
-  .command('disable <name>')
-  .description('Disable a tool')
-  .action(async (name) => {
-    const { disableTool } = await import('./commands/tools.js');
-    await disableTool(name);
-  });
-
-// Skills commands
-const skillsCmd = program
-  .command('skills')
-  .description('Manage skills');
-
-skillsCmd
-  .command('list')
-  .description('List available skills')
-  .action(async () => {
-    const { listSkills } = await import('./commands/skills.js');
-    await listSkills();
-  });
-
-skillsCmd
-  .command('load <name> <path>')
-  .description('Load a skill from path')
-  .action(async (name, path) => {
-    const { loadSkill } = await import('./commands/skills.js');
-    await loadSkill(name, path);
-  });
-
-skillsCmd
-  .command('unload <name>')
-  .description('Unload a skill')
-  .action(async (name) => {
-    const { unloadSkill } = await import('./commands/skills.js');
-    await unloadSkill(name);
-  });
-
-// Memory commands
-const memoryCmd = program
+// Memory command
+program
   .command('memory')
-  .description('Manage memory');
+  .description('Manage memory')
+  .addCommand(
+    new Command('add')
+      .description('Add memory entry')
+      .argument('<target>', 'Target (user|memory|session)')
+      .argument('<content>', 'Content to remember')
+      .action(async (target, content) => {
+        const { addMemory } = await import('./commands/memory.js');
+        await addMemory(target, content);
+      })
+  )
+  .addCommand(
+    new Command('search')
+      .description('Search memory')
+      .argument('<target>', 'Target (user|memory|session)')
+      .argument('<query>', 'Search query')
+      .option('-l, --limit <limit>', 'Limit results', '10')
+      .action(async (target, query, options) => {
+        const { searchMemory } = await import('./commands/memory.js');
+        await searchMemory(target, query, parseInt(options.limit));
+      })
+  )
+  .addCommand(
+    new Command('list')
+      .description('List memory entries')
+      .argument('<target>', 'Target (user|memory|session)')
+      .option('-l, --limit <limit>', 'Limit results', '20')
+      .action(async (target, options) => {
+        const { listMemory } = await import('./commands/memory.js');
+        await listMemory(target, parseInt(options.limit));
+      })
+  )
+  .addCommand(
+    new Command('clear')
+      .description('Clear memory')
+      .argument('<target>', 'Target (user|memory|session)')
+      .action(async (target) => {
+        const { clearMemory } = await import('./commands/memory.js');
+        await clearMemory(target);
+      })
+  );
 
-memoryCmd
-  .command('add <target> <content>')
-  .description('Add memory entry (target: user|memory)')
-  .action(async (target, content) => {
-    const { addMemory } = await import('./commands/memory.js');
-    await addMemory(target, content);
-  });
-
-memoryCmd
-  .command('search <target> <query>')
-  .description('Search memory (target: user|memory)')
-  .option('-l, --limit <limit>', 'Max results', '10')
-  .action(async (target, query, options) => {
-    const { searchMemory } = await import('./commands/memory.js');
-    await searchMemory(target, query, parseInt(options.limit));
-  });
-
-memoryCmd
-  .command('list <target>')
-  .description('List memory entries (target: user|memory)')
-  .option('-l, --limit <limit>', 'Max results', '20')
-  .action(async (target, options) => {
-    const { listMemory } = await import('./commands/memory.js');
-    await listMemory(target, parseInt(options.limit));
-  });
-
-memoryCmd
-  .command('clear <target>')
-  .description('Clear memory (target: user|memory)')
-  .action(async (target) => {
-    const { clearMemory } = await import('./commands/memory.js');
-    await clearMemory(target);
-  });
-
-// Session commands
-const sessionCmd = program
+// Session command
+program
   .command('session')
-  .description('Manage chat sessions');
+  .description('Manage chat sessions')
+  .addCommand(
+    new Command('list')
+      .description('List saved sessions')
+      .action(async () => {
+        const { listSessions } = await import('./commands/session.js');
+        await listSessions();
+      })
+  )
+  .addCommand(
+    new Command('new')
+      .description('Start new session')
+      .argument('[title]', 'Session title')
+      .action(async (title) => {
+        const { newSession } = await import('./commands/session.js');
+        await newSession(title);
+      })
+  )
+  .addCommand(
+    new Command('load')
+      .description('Load a session')
+      .argument('<id>', 'Session ID')
+      .action(async (id) => {
+        const { loadSession } = await import('./commands/session.js');
+        await loadSession(id);
+      })
+  )
+  .addCommand(
+    new Command('delete')
+      .description('Delete a session')
+      .argument('<id>', 'Session ID')
+      .action(async (id) => {
+        const { deleteSession } = await import('./commands/session.js');
+        await deleteSession(id);
+      })
+  );
 
-sessionCmd
-  .command('list')
-  .description('List sessions')
-  .action(async () => {
-    const { listSessions } = await import('./commands/session.js');
-    await listSessions();
-  });
-
-sessionCmd
-  .command('new [title]')
-  .description('Start new session')
-  .action(async (title) => {
-    const { newSession } = await import('./commands/session.js');
-    await newSession(title);
-  });
-
-sessionCmd
-  .command('load <id>')
-  .description('Load a session')
-  .action(async (id) => {
-    const { loadSession } = await import('./commands/session.js');
-    await loadSession(id);
-  });
-
-sessionCmd
-  .command('delete <id>')
-  .description('Delete a session')
-  .action(async (id) => {
-    const { deleteSession } = await import('./commands/session.js');
-    await deleteSession(id);
-  });
-
-// Delegation commands
-const delegationCmd = program
+// Delegate command
+program
   .command('delegate')
-  .description('Manage task delegation');
+  .description('Manage task delegation')
+  .addCommand(
+    new Command('spawn')
+      .description('Spawn a subagent')
+      .argument('<goal>', 'Task goal')
+      .option('-c, --context <context>', 'Additional context')
+      .option('-r, --role <role>', 'Role (leaf|orchestrator)', 'leaf')
+      .action(async (goal, options) => {
+        const { spawnDelegation } = await import('./commands/delegation.js');
+        await spawnDelegation(goal, { context: options.context, role: options.role as 'leaf' | 'orchestrator' });
+      })
+  )
+  .addCommand(
+    new Command('list')
+      .description('List active delegations')
+      .action(async () => {
+        const { listDelegations } = await import('./commands/delegation.js');
+        await listDelegations();
+      })
+  )
+  .addCommand(
+    new Command('cancel')
+      .description('Cancel a delegation')
+      .argument('<id>', 'Delegation ID')
+      .action(async (id) => {
+        const { cancelDelegation } = await import('./commands/delegation.js');
+        await cancelDelegation(id);
+      })
+  );
 
-delegationCmd
-  .command('spawn <goal>')
-  .description('Spawn a subagent for a task')
-  .option('-c, --context <context>', 'Task context')
-  .option('-r, --role <role>', 'Agent role (leaf|orchestrator)', 'leaf')
-  .action(async (goal, options) => {
-    const { spawnDelegation } = await import('./commands/delegation.js');
-    await spawnDelegation(goal, options);
-  });
-
-delegationCmd
-  .command('batch')
-  .description('Spawn multiple subagents in parallel')
-  .option('-f, --file <file>', 'JSON file with tasks')
-  .action(async (options) => {
-    const { batchDelegation } = await import('./commands/delegation.js');
-    await batchDelegation(options);
-  });
-
-delegationCmd
-  .command('list')
-  .description('List active delegations')
-  .action(async () => {
-    const { listDelegations } = await import('./commands/delegation.js');
-    await listDelegations();
-  });
-
-delegationCmd
-  .command('cancel <id>')
-  .description('Cancel a delegation')
-  .action(async (id) => {
-    const { cancelDelegation } = await import('./commands/delegation.js');
-    await cancelDelegation(id);
-  });
-
-// Cron commands
-const cronCmd = program
+// Cron command
+program
   .command('cron')
-  .description('Manage scheduled jobs');
-
-cronCmd
-  .command('create <name> <schedule> <prompt>')
-  .description('Create a cron job')
-  .option('-s, --skills <skills>', 'Comma-separated skills')
-  .option('-m, --model <model>', 'Model to use')
-  .option('--no-agent', 'Run as script only (no agent)')
-  .option('--script <script>', 'Script path for no-agent mode')
-  .action(async (name, schedule, prompt, options) => {
-    const { createCron } = await import('./commands/cron.js');
-    await createCron(name, schedule, prompt, options);
-  });
-
-cronCmd
-  .command('list')
-  .description('List cron jobs')
-  .action(async () => {
-    const { listCron } = await import('./commands/cron.js');
-    await listCron();
-  });
-
-cronCmd
-  .command('remove <id>')
-  .description('Remove a cron job')
-  .action(async (id) => {
-    const { removeCron } = await import('./commands/cron.js');
-    await removeCron(id);
-  });
-
-cronCmd
-  .command('run <id>')
-  .description('Run a cron job manually')
-  .action(async (id) => {
-    const { runCron } = await import('./commands/cron.js');
-    await runCron(id);
-  });
+  .description('Manage scheduled jobs')
+  .addCommand(
+    new Command('create')
+      .description('Create a scheduled job')
+      .argument('<name>', 'Job name')
+      .argument('<schedule>', 'Cron schedule (e.g. "0 2 * * *")')
+      .argument('<prompt>', 'Prompt for the agent')
+      .option('--skills <skills>', 'Comma-separated skills')
+      .option('--model <model>', 'Model to use')
+      .option('--no-agent', 'Run as script only')
+      .option('--script <path>', 'Script path')
+      .action(async (name, schedule, prompt, options) => {
+        const { createCron } = await import('./commands/cron.js');
+        await createCron(name, schedule, prompt, options);
+      })
+  )
+  .addCommand(
+    new Command('list')
+      .description('List scheduled jobs')
+      .action(async () => {
+        const { listCron } = await import('./commands/cron.js');
+        await listCron();
+      })
+  )
+  .addCommand(
+    new Command('run')
+      .description('Run a job manually')
+      .argument('<id>', 'Job ID')
+      .action(async (id) => {
+        const { runCron } = await import('./commands/cron.js');
+        await runCron(id);
+      })
+  )
+  .addCommand(
+    new Command('remove')
+      .description('Remove a scheduled job')
+      .argument('<id>', 'Job ID')
+      .action(async (id) => {
+        const { removeCron } = await import('./commands/cron.js');
+        await removeCron(id);
+      })
+  );
 
 // Doctor command
 program
   .command('doctor')
   .description('Check system health and configuration')
-  .action(async () => {
+  .option('--verbose', 'Verbose output')
+  .action(async (options) => {
     const { runDoctor } = await import('./commands/doctor.js');
     await runDoctor();
   });
@@ -372,41 +360,21 @@ program
 program
   .command('init')
   .description('Initialize CodeLES in current directory')
-  .option('-f, --force', 'Overwrite existing config')
+  .option('-f, --force', 'Force reinitialize')
   .action(async (options) => {
     const { initProject } = await import('./commands/init.js');
     await initProject(options.force);
   });
 
-// Version info
+// Version command
 program
   .command('version')
   .description('Show version information')
   .action(() => {
-    console.log(boxen(
-      chalk.bold.cyan('CodeLES v1.0.0') + '\n' +
-      chalk.gray('AI Coding Agent with 1M Context') + '\n' +
-      chalk.gray('Powered by NVIDIA Nemotron 3 Ultra') + '\n\n' +
-      chalk.blue('Lutchi Enterprise Systems') + '\n' +
-      chalk.gray('https://lutchi.vercel.app'),
-      { padding: 1, borderStyle: 'round', borderColor: 'cyan' }
-    ));
+    console.log('CodeLES v1.0.0');
+    console.log('AI Coding Agent with 1M Context');
+    console.log('Powered by LES - Lutchi Enterprise Systems');
   });
-
-// Help customization
-program.addHelpText('after', `
-${chalk.bold('Examples:')}
-  $ codeles chat                    # Start interactive chat
-  $ codeles chat -m gpt-4o          # Use specific model
-  $ codeles provider add my-openai -t openai -k sk-... -m gpt-4o
-  $ codeles config set agent.temperature 0.5
-  $ codeles memory add user "Prefiro TypeScript estrito"
-  $ codeles delegate spawn "Refatorar auth module" -c "Usar JWT"
-  $ codeles cron create daily-backup "0 2 * * *" "Fazer backup do projeto"
-
-${chalk.bold('Default Provider:')} NVIDIA Nemotron 3 Ultra (1M context, zero-config)
-${chalk.bold('Config:')} ~/.codeles/profiles/default/config.yaml
-`);
 
 // Error handling
 program.exitOverride();
@@ -418,14 +386,8 @@ async function main() {
     if (error.code === 'COMMANDER_HELP') {
       process.exit(0);
     }
-    console.error(chalk.red('Error:'), error.message);
+    console.error(chalk.red(`Error: ${error.message}`));
     process.exit(1);
-  }
-
-  // Show help if no command provided
-  if (!process.argv.slice(2).length) {
-    program.outputHelp();
-    console.log();
   }
 }
 

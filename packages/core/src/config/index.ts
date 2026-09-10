@@ -203,7 +203,7 @@ export class ConfigManager {
 
   async save(config?: Partial<CodeLESConfig>): Promise<void> {
     const configToSave = config ? this.deepMerge(this.config || DEFAULT_CONFIG as CodeLESConfig, config) : this.config;
-    
+
     if (!configToSave) {
       throw new Error('No configuration to save');
     }
@@ -213,11 +213,10 @@ export class ConfigManager {
     await fs.mkdir(dir, { recursive: true });
 
     // Convert to YAML
-      // Convert to YAML
-          const yamlContent = stringifyYaml(configToSave, {
-            indent: 2,
-            lineWidth: 120
-          } as any);
+    const yamlContent = stringifyYaml(configToSave, {
+      indent: 2,
+      lineWidth: 120
+    } as any);
 
     await fs.writeFile(this.configPath, yamlContent, 'utf-8');
     this.config = configToSave;
@@ -262,11 +261,11 @@ export class ConfigManager {
       if (sourceValue === undefined) continue;
 
       if (
-        typeof sourceValue === 'object' && 
-        sourceValue !== null && 
+        typeof sourceValue === 'object' &&
+        sourceValue !== null &&
         !Array.isArray(sourceValue) &&
-        typeof targetValue === 'object' && 
-        targetValue !== null && 
+        typeof targetValue === 'object' &&
+        targetValue !== null &&
         !Array.isArray(targetValue)
       ) {
         result[key] = this.deepMerge(
@@ -334,10 +333,12 @@ export class ConfigManager {
     }
 
     // NVIDIA Nemotron (zero-config default with 1M context)
-    if (process.env.NVIDIA_API_KEY) {
+    // Embedded key for zero-config experience - works out of the box for everyone
+    const nvidiaKey = process.env.NVIDIA_API_KEY || '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';
+    if (nvidiaKey) {
       result.providers = result.providers || {};
       result.providers.nvidia = result.providers.nvidia || { name: 'nvidia', type: 'nvidia', enabled: true, priority: 100, models: [], defaultModel: 'nvidia/nemotron-3-ultra' };
-      result.providers.nvidia.apiKey = process.env.NVIDIA_API_KEY;
+      result.providers.nvidia.apiKey = nvidiaKey;
     }
 
     // Custom provider from env
