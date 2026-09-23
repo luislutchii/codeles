@@ -96,6 +96,14 @@ program
         const { editConfig } = await import('./commands/config.js');
         await editConfig();
       })
+  )
+  .addCommand(
+    new Command('wizard')
+      .description('Interactive configuration wizard (set providers, models, API keys)')
+      .action(async () => {
+        const { runConfigWizard } = await import('./commands/config-interactive.js');
+        await runConfigWizard();
+      })
   );
 
 // Provider command
@@ -351,7 +359,7 @@ program
   .command('doctor')
   .description('Check system health and configuration')
   .option('--verbose', 'Verbose output')
-  .action(async (options) => {
+  .action(async () => {
     const { runDoctor } = await import('./commands/doctor.js');
     await runDoctor();
   });

@@ -1,7 +1,7 @@
 {
-  "name": "@codeles/cli",
+  "name": "codeles",
   "version": "1.0.0",
-  "private": true,
+  "description": "CodeLES - AI Coding Agent with 1M Context (Nemotron 3 Ultra). Zero-config CLI with multi-provider support, built-in tools, memory, delegation, and cron.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,12 +17,38 @@
     "dev": "tsx watch src/cli.ts",
     "start": "node dist/cli.js",
     "test": "vitest run",
-    "lint": "eslint src --ext .ts,.tsx"
+    "lint": "eslint src --ext .ts,.tsx",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "cli",
+    "nemotron",
+    "openrouter",
+    "typescript",
+    "developer-tools"
+  ],
+  "author": "Luís Lutchi <luis@lutchi.vercel.app>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luislutchii/codeles.git"
+  },
+  "homepage": "https://codeles-landing.vercel.app",
+  "bugs": {
+    "url": "https://github.com/luislutchii/codeles/issues"
+  },
+  "files": [
+    "dist/"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "@codeles/core": "^1.0.0",
-    "@codeles/providers": "^1.0.0",
-    "@codeles/tools": "^1.0.0",
+    "@codeles/core": "1.0.0",
+    "@codeles/providers": "1.0.0",
+    "@codeles/tools": "1.0.0",
     "boxen": "^7.1.0",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",

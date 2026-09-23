@@ -1,7 +1,7 @@
 {
   "name": "@codeles/providers",
   "version": "1.0.0",
-  "private": true,
+  "description": "CodeLES Providers - Multi-provider AI adapters (OpenAI, Anthropic, OpenRouter, Google, NVIDIA, etc.)",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -14,11 +14,38 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "providers",
+    "openai",
+    "anthropic",
+    "openrouter",
+    "google",
+    "nvidia",
+    "nemotron"
+  ],
+  "author": "Luís Lutchi <luis@lutchi.vercel.app>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luislutchii/codeles.git"
+  },
+  "homepage": "https://codeles-landing.vercel.app",
+  "bugs": {
+    "url": "https://github.com/luislutchii/codeles/issues"
+  },
+  "files": [
+    "dist/"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.20.0",
-    "@codeles/core": "^1.0.0",
+    "@codeles/core": "1.0.0",
     "@google/generative-ai": "^0.24.1",
     "cohere-ai": "^8.1.0",
     "openai": "^4.30.0",

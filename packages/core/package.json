@@ -1,7 +1,7 @@
 {
   "name": "@codeles/core",
   "version": "1.0.0",
-  "private": true,
+  "description": "CodeLES Core - Configuration, types, memory, session, and delegation management",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -14,7 +14,30 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
-    "lint": "eslint src --ext .ts"
+    "lint": "eslint src --ext .ts",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "ai",
+    "coding-agent",
+    "configuration",
+    "typescript"
+  ],
+  "author": "Luís Lutchi <luis@lutchi.vercel.app>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/luislutchii/codeles.git"
+  },
+  "homepage": "https://codeles-landing.vercel.app",
+  "bugs": {
+    "url": "https://github.com/luislutchii/codeles/issues"
+  },
+  "files": [
+    "dist/"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "zod": "^3.22.0",
