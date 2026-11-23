@@ -340,12 +340,6 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
               if (inputBuffer.length > 0) {
                 inputBuffer = inputBuffer.slice(0, -1);
                 filterCommands(inputBuffer);
-                // Exit command mode if buffer is empty or no longer starts with "/"
-                if (inputBuffer.length === 0 || !inputBuffer.startsWith('/')) {
-                  inCommandMode = false;
-                  selectedCommandIndex = 0;
-                  filterCommands('');
-                }
                 renderLine();
               } else {
                 // Exit command mode if buffer is empty
@@ -354,12 +348,18 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
                 filterCommands('');
                 renderLine();
               }
-      } else if (key.length === 1 && key >= ' ' && key <= '~') { // Printable characters
-        inputBuffer += key;
-        filterCommands(inputBuffer);
-        renderLine();
-      }
-    } else {
+      } else if (key.length === 1 && key >= ' ' && key <= '~') { // Printable ASCII characters
+              inputBuffer += key;
+              filterCommands(inputBuffer);
+              renderLine();
+            } else if (key.length > 0) {
+              // Handle non-ASCII characters (accented letters, etc.)
+              // In raw mode, these may come as multi-byte sequences
+              inputBuffer += key;
+              filterCommands(inputBuffer);
+              renderLine();
+            }
+          } else {
       // Handle normal mode
       if (key === '\r') { // Enter (Carriage Return) - ignore \n (Line Feed) to prevent double submit
         submitLine();
@@ -371,17 +371,21 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
           renderLine();
         }
       } else if (key === '/') {
-        // Enter command mode when '/' is pressed
-        inCommandMode = true;
-        selectedCommandIndex = 0;
-        inputBuffer = '/';
-        filterCommands('/');
-        renderLine();
-      } else if (key.length === 1 && key >= ' ' && key <= '~') { // Printable characters
-        inputBuffer += key;
-        renderLine();
-      }
-      // Ignore other keys (like arrow keys in normal mode)
+              // Enter command mode when '/' is pressed
+              inCommandMode = true;
+              selectedCommandIndex = 0;
+              inputBuffer = '/';
+              filterCommands('/');
+              renderLine();
+            } else if (key.length === 1 && key >= ' ' && key <= '~') { // Printable ASCII characters
+              inputBuffer += key;
+              renderLine();
+            } else if (key.length > 0) {
+              // Handle non-ASCII characters (accented letters, etc.)
+              inputBuffer += key;
+              renderLine();
+            }
+            // Ignore other keys (like arrow keys in normal mode)
     }
   };
 
@@ -671,66 +675,34 @@ async function handleCommand(command: string, config: CodeLESConfig, messages: C
       break;
 
     case '/provider':
-      if (parts[1] === 'list') {
-        const providers = Object.keys(config.providers);
-        console.log(chalk.bold('\nProviders configurados:'));
-        for (const p of providers) {
-          const prov = config.providers[p];
-          const marker = p === config.agent.defaultProvider ? chalk.cyan(' →') : '';
-          console.log(`  ${prov.enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(p)}${marker} (${prov.type}) - ${prov.defaultModel}`);
-        }
-      } else if (parts[1] === 'add') {
-        console.log(chalk.yellow('Use: codeles config wizard para adicionar providers'));
-      } else if (parts[1] === 'remove') {
-        console.log(chalk.yellow('Use: codeles config wizard para remover providers'));
-      } else {
-        console.log(chalk.yellow('Uso: /provider list | add | remove'));
-      }
-      break;
-
-    case '/model':
-      if (parts[1] === 'list' || parts[1] === 'select') {
-        // Show model picker - fetch from provider adapter
-        console.log(chalk.bold('\nModelos disponíveis para ' + chalk.cyan(config.agent.defaultProvider) + ':'));
-
-        // Try to get models from provider adapter
-        const adapter = providerRegistry.getAdapter(config.agent.defaultProvider);
-        if (adapter && typeof adapter.listModels === 'function') {
-          try {
-            const models = await adapter.listModels();
-            if (models && models.length > 0) {
-              models.forEach((m: any, i: number) => {
-                const marker = m.id === config.agent.defaultModel ? chalk.cyan(' →') : '';
-                const ctxInfo = m.contextWindow ? chalk.gray(` (${m.contextWindow.toLocaleString()} ctx)`) : '';
-                console.log(`  ${i + 1}. ${chalk.cyan(m.id)}${ctxInfo}${marker}`);
-              });
-            } else {
-              console.log(chalk.gray('  Nenhum modelo disponível'));
+          if (parts[1] === 'list') {
+            const providers = Object.keys(config.providers);
+            console.log(chalk.bold('\nProviders configurados:'));
+            for (const p of providers) {
+              const prov = config.providers[p];
+              const marker = p === config.agent.defaultProvider ? chalk.cyan(' →') : '';
+              console.log(`  ${prov.enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(p)}${marker} (${prov.type}) - ${prov.defaultModel}`);
             }
-          } catch (error) {
-            console.log(chalk.gray('  Erro ao buscar modelos: ') + chalk.red(String(error)));
-            console.log(chalk.gray('  Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
-          }
-        } else {
-          // Fallback to config models
-          const providerConfig = config.providers[config.agent.defaultProvider];
-          if (providerConfig && providerConfig.models && providerConfig.models.length > 0) {
-            providerConfig.models.forEach((m: any, i: number) => {
-              const marker = m.id === config.agent.defaultModel ? chalk.cyan(' →') : '';
-              console.log(`  ${i + 1}. ${chalk.cyan(m.id)}${marker}`);
-            });
+          } else if (parts[1] === 'select') {
+            await selectProvider(config);
+          } else if (parts[1] === 'add') {
+            console.log(chalk.yellow('Use: codeles config wizard para adicionar providers'));
+          } else if (parts[1] === 'remove') {
+            console.log(chalk.yellow('Use: codeles config wizard para remover providers'));
           } else {
-            console.log(chalk.gray('  Nenhum modelo listado na configuração'));
-            console.log(chalk.gray('  Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
+            console.log(chalk.yellow('Uso: /provider list | select | add | remove'));
           }
-        }
-        console.log(chalk.gray('\nUse: codeles chat --model <modelo> para trocar'));
-      } else {
-        console.log(chalk.yellow('Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
-        console.log(chalk.gray('Comandos: /model list | /model select'));
-        console.log(chalk.gray('Para trocar: codeles chat --model <modelo>'));
-      }
-      break;
+          break;
+
+        case '/model':
+          if (parts[1] === 'list' || parts[1] === 'select') {
+            await selectModel(config);
+          } else {
+            console.log(chalk.yellow('Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
+            console.log(chalk.gray('Comandos: /model list | /model select'));
+            console.log(chalk.gray('Para trocar: codeles chat --model <modelo>'));
+          }
+          break;
 
     case '/tools':
       if (parts[1] === 'enable' || parts[1] === 'disable') {
@@ -777,6 +749,59 @@ async function handleCommand(command: string, config: CodeLESConfig, messages: C
       break;
 
     default:
-      console.log(chalk.yellow(`Comando desconhecido: ${cmd}. Use /help para ver comandos disponíveis.`));
-  }
-}
+          console.log(chalk.yellow(`Comando desconhecido: ${cmd}. Use /help para ver comandos disponíveis.`));
+      }
+    }
+
+    async function selectProvider(config: CodeLESConfig): Promise<void> {
+      const providers = Object.keys(config.providers);
+      if (providers.length === 0) {
+        console.log(chalk.yellow('Nenhum provider configurado. Use /provider add ou codeles config wizard'));
+        return;
+      }
+
+      console.log(chalk.bold('\nProviders configurados:'));
+      providers.forEach((p, i) => {
+        const prov = config.providers[p];
+        const marker = p === config.agent.defaultProvider ? chalk.cyan(' ← atual') : '';
+        console.log(`  ${i + 1}. ${prov.enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(p)}${marker} (${prov.type}) - ${prov.defaultModel}`);
+      });
+
+      console.log(chalk.gray('\nUse: codeles chat --provider <nome> para trocar'));
+      console.log(chalk.gray('Ou edite a configuração: codeles config wizard'));
+    }
+
+    async function selectModel(config: CodeLESConfig): Promise<void> {
+      console.log(chalk.bold('\nModelos disponíveis para ' + chalk.cyan(config.agent.defaultProvider) + ':'));
+
+      const adapter = providerRegistry.getAdapter(config.agent.defaultProvider);
+      if (adapter && typeof adapter.listModels === 'function') {
+        try {
+          const models = await adapter.listModels();
+          if (models && models.length > 0) {
+            models.forEach((m: any, i: number) => {
+              const marker = m.id === config.agent.defaultModel ? chalk.cyan(' ← atual') : '';
+              const ctxInfo = m.contextWindow ? chalk.gray(` (${m.contextWindow.toLocaleString()} ctx)`) : '';
+              console.log(`  ${i + 1}. ${chalk.cyan(m.id)}${ctxInfo}${marker}`);
+            });
+          } else {
+            console.log(chalk.gray('  Nenhum modelo disponível'));
+          }
+        } catch (error) {
+          console.log(chalk.gray('  Erro ao buscar modelos: ') + chalk.red(String(error)));
+          console.log(chalk.gray('  Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
+        }
+      } else {
+        const providerConfig = config.providers[config.agent.defaultProvider];
+        if (providerConfig && providerConfig.models && providerConfig.models.length > 0) {
+          providerConfig.models.forEach((m: any, i: number) => {
+            const marker = m.id === config.agent.defaultModel ? chalk.cyan(' ← atual') : '';
+            console.log(`  ${i + 1}. ${chalk.cyan(m.id)}${marker}`);
+          });
+        } else {
+          console.log(chalk.gray('  Nenhum modelo listado na configuração'));
+          console.log(chalk.gray('  Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
+        }
+      }
+      console.log(chalk.gray('\nUse: codeles chat --model <modelo> para trocar'));
+    }
