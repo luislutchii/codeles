@@ -110,6 +110,14 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
   let filteredCommands = COMMAND_SUGGESTIONS;
   let commandModeStarted = false;
 
+  // State for submenu (provider/model selection)
+  let inSubmenuMode = false;
+  let submenuType: 'provider' | 'model' | null = null;
+  let submenuItems: string[] = [];
+  let selectedSubmenuIndex = 0;
+  let submenuStarted = false;
+  let lastSubmenuLineCount = 0;
+
   // Timer for updating status bar in real-time (only when not actively streaming)
   let statusTimer: NodeJS.Timeout | null = null;
   let isStreamingContent = false;
@@ -132,160 +140,212 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
   };
 
   // Track rendered lines for efficient updates
-    let menuRendered = false;
-    let lastMenuLineCount = 0;
-    let isFirstRender = true;
+  let menuRendered = false;
+  let lastMenuLineCount = 0;
+  let isFirstRender = true;
 
-    // Function to render the prompt, status bar, and current input
-    const renderLine = () => {
-      // Calculate session elapsed time
-      const sessionElapsedMs = Date.now() - sessionStartTime;
+  // Function to render the prompt, status bar, and current input
+  const renderLine = () => {
+    // Calculate session elapsed time
+    const sessionElapsedMs = Date.now() - sessionStartTime;
 
-      // Calculate response elapsed time
-      let responseElapsedMs = 0;
-      if (isResponding && responseStartTime > 0) {
-        responseElapsedMs = Date.now() - responseStartTime;
-      }
+    // Calculate response elapsed time
+    let responseElapsedMs = 0;
+    if (isResponding && responseStartTime > 0) {
+      responseElapsedMs = Date.now() - responseStartTime;
+    }
 
-      // Show status bar (Hermes-style)
-      const statusBar = getStatusBar({
-        model: config.agent.defaultModel,
-        tokensUsed,
-        tokensMax,
-        toolsCount,
-        sessionElapsedMs,
-        responseElapsedMs,
-        isResponding,
-        isDone
-      });
+    // Show status bar (Hermes-style)
+    const statusBar = getStatusBar({
+      model: config.agent.defaultModel,
+      tokensUsed,
+      tokensMax,
+      toolsCount,
+      sessionElapsedMs,
+      responseElapsedMs,
+      isResponding,
+      isDone
+    });
 
-      if (isFirstRender) {
-        // First render: write status bar and prompt
-        output.write(statusBar + '\n');
-        isFirstRender = false;
-      } else {
-        // Update in-place: move cursor up to status bar line and clear it
-        // Status bar is at a fixed position relative to current cursor
-        // We need to move up past prompt line, menu (if any), then update status bar
-        const linesToMoveUp = 1; // move up from prompt line to status bar line
-        readline.cursorTo(output, 0);
-        readline.moveCursor(output, 0, -linesToMoveUp);
-        readline.clearLine(output, 0);
-        output.write(statusBar);
-        // Move cursor back down to prompt line
-        readline.cursorTo(output, 0);
-        readline.moveCursor(output, 0, linesToMoveUp);
-      }
-
-      // Show prompt - clear current line and write prompt + buffer
+    if (isFirstRender) {
+      // First render: write status bar and prompt
+      output.write(statusBar + '\n');
+      isFirstRender = false;
+    } else {
+      // Update in-place: move cursor up to status bar line and clear it
+      const linesToMoveUp = 1;
       readline.cursorTo(output, 0);
+      readline.moveCursor(output, 0, -linesToMoveUp);
+      readline.clearLine(output, 0);
+      output.write(statusBar);
+      // Move cursor back down to prompt line
+      readline.cursorTo(output, 0);
+      readline.moveCursor(output, 0, linesToMoveUp);
+    }
+
+    // Show prompt - clear current line and write prompt + buffer
+    readline.cursorTo(output, 0);
+    readline.clearLine(output, 0);
+    const promptText = getPrompt(config.agent.defaultProvider, config.agent.defaultModel);
+    output.write(promptText + inputBuffer);
+
+    if (inCommandMode) {
+      if (!commandModeStarted) {
+        // First time entering command mode - render full menu below prompt
+        commandModeStarted = true;
+        output.write('\n');
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+        output.write(chalk.bold.cyan('  COMANDOS DISPONÍVEIS') + '\n');
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+
+        // Group by category
+        const categories = [...new Set(filteredCommands.map(c => c.category))];
+        let lineCount = 0;
+        categories.forEach((cat, catIdx) => {
+          const catCommands = filteredCommands.filter(c => c.category === cat);
+          output.write(chalk.gray(`  ${cat}:`) + '\n');
+          lineCount++;
+          catCommands.forEach((cmd, idx) => {
+            const globalIdx = filteredCommands.indexOf(cmd);
+            if (globalIdx === selectedCommandIndex) {
+              output.write(chalk.cyan(`    ▸ ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
+            } else {
+              output.write(chalk.gray(`      ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
+            }
+            lineCount++;
+          });
+        });
+        lastMenuLineCount = lineCount + 3;
+
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+        output.write(chalk.gray('  ↑/↓ navega  •  Enter seleciona  •  ESC/Q cancela') + '\n');
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+      } else {
+        // Re-render menu by moving cursor up and clearing menu area
+        readline.cursorTo(output, 0);
+        readline.moveCursor(output, 0, - (lastMenuLineCount + 1));
+
+        for (let i = 0; i < lastMenuLineCount + 1; i++) {
+          readline.clearLine(output, 0);
+          if (i < lastMenuLineCount) readline.moveCursor(output, 0, 1);
+        }
+
+        readline.cursorTo(output, 0);
+        readline.moveCursor(output, 0, - (lastMenuLineCount + 1));
+
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+        output.write(chalk.bold.cyan('  COMANDOS DISPONÍVEIS') + '\n');
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+
+        let lineCount = 0;
+        const categories = [...new Set(filteredCommands.map(c => c.category))];
+        categories.forEach((cat, catIdx) => {
+          const catCommands = filteredCommands.filter(c => c.category === cat);
+          output.write(chalk.gray(`  ${cat}:`) + '\n');
+          lineCount++;
+          catCommands.forEach((cmd, idx) => {
+            const globalIdx = filteredCommands.indexOf(cmd);
+            if (globalIdx === selectedCommandIndex) {
+              output.write(chalk.cyan(`    ▸ ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
+            } else {
+              output.write(chalk.gray(`      ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
+            }
+            lineCount++;
+          });
+        });
+        lastMenuLineCount = lineCount + 3;
+
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+        output.write(chalk.gray('  ↑/↓ navega  •  Enter seleciona  •  ESC/Q cancela') + '\n');
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+      }
+
+      // Re-show the prompt and buffer on the line after the popup
+      readline.cursorTo(output, 0);
+      readline.moveCursor(output, 0, lastMenuLineCount + 2);
       readline.clearLine(output, 0);
       const promptText = getPrompt(config.agent.defaultProvider, config.agent.defaultModel);
       output.write(promptText + inputBuffer);
+    } else if (inSubmenuMode) {
+      // Render submenu (provider/model selection)
+      if (!submenuStarted) {
+        submenuStarted = true;
+        output.write('\n');
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+        const title = submenuType === 'provider' ? '  SELECIONAR PROVIDER' : '  SELECIONAR MODELO';
+        output.write(chalk.bold.cyan(title) + '\n');
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
 
-      if (inCommandMode) {
-        if (!commandModeStarted) {
-          // First time entering command mode - render full menu below prompt
-          commandModeStarted = true;
-          output.write('\n');
-          output.write(chalk.gray('─'.repeat(56)) + '\n');
-          output.write(chalk.bold.cyan('  COMANDOS DISPONÍVEIS') + '\n');
-          output.write(chalk.gray('─'.repeat(56)) + '\n');
-
-          // Group by category
-          const categories = [...new Set(filteredCommands.map(c => c.category))];
-          let lineCount = 0;
-          categories.forEach((cat, catIdx) => {
-            const catCommands = filteredCommands.filter(c => c.category === cat);
-            output.write(chalk.gray(`  ${cat}:`) + '\n');
-            lineCount++;
-            catCommands.forEach((cmd, idx) => {
-              const globalIdx = filteredCommands.indexOf(cmd);
-              if (globalIdx === selectedCommandIndex) {
-                output.write(chalk.cyan(`    ▸ ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
-              } else {
-                output.write(chalk.gray(`      ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
-              }
-              lineCount++;
-            });
-          });
-          lastMenuLineCount = lineCount + 3; // category lines + command lines + separators
-
-          output.write(chalk.gray('─'.repeat(56)) + '\n');
-          output.write(chalk.gray('  ↑/↓ navega  •  Enter seleciona  •  ESC/Q cancela') + '\n');
-          output.write(chalk.gray('─'.repeat(56)) + '\n');
-        } else {
-          // Re-render menu by moving cursor up and clearing menu area
-          // Move cursor up to the line after prompt (menu starts 1 line after prompt)
-          readline.cursorTo(output, 0);
-          readline.moveCursor(output, 0, - (lastMenuLineCount + 1)); // -1 for prompt line
-
-          // Clear menu lines
-          for (let i = 0; i < lastMenuLineCount + 1; i++) {
-            readline.clearLine(output, 0);
-            if (i < lastMenuLineCount) readline.moveCursor(output, 0, 1);
+        submenuItems.forEach((item, idx) => {
+          if (idx === selectedSubmenuIndex) {
+            output.write(chalk.cyan(`    ▸ ${item}`) + '\n');
+          } else {
+            output.write(chalk.gray(`      ${item}`) + '\n');
           }
+        });
+        lastSubmenuLineCount = submenuItems.length + 3;
 
-          // Go back to menu start (line after prompt)
-          readline.cursorTo(output, 0);
-          readline.moveCursor(output, 0, - (lastMenuLineCount + 1));
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+        output.write(chalk.gray('  ↑/↓ navega  •  Enter seleciona  •  ESC/Q cancela') + '\n');
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+      } else {
+        // Re-render submenu
+        readline.cursorTo(output, 0);
+        readline.moveCursor(output, 0, - (lastSubmenuLineCount + 1));
 
-          // Re-render menu
-          output.write(chalk.gray('─'.repeat(56)) + '\n');
-          output.write(chalk.bold.cyan('  COMANDOS DISPONÍVEIS') + '\n');
-          output.write(chalk.gray('─'.repeat(56)) + '\n');
-
-          let lineCount = 0;
-          const categories = [...new Set(filteredCommands.map(c => c.category))];
-          categories.forEach((cat, catIdx) => {
-            const catCommands = filteredCommands.filter(c => c.category === cat);
-            output.write(chalk.gray(`  ${cat}:`) + '\n');
-            lineCount++;
-            catCommands.forEach((cmd, idx) => {
-              const globalIdx = filteredCommands.indexOf(cmd);
-              if (globalIdx === selectedCommandIndex) {
-                output.write(chalk.cyan(`    ▸ ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
-              } else {
-                output.write(chalk.gray(`      ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
-              }
-              lineCount++;
-            });
-          });
-          lastMenuLineCount = lineCount + 3;
-
-          output.write(chalk.gray('─'.repeat(56)) + '\n');
-          output.write(chalk.gray('  ↑/↓ navega  •  Enter seleciona  •  ESC/Q cancela') + '\n');
-          output.write(chalk.gray('─'.repeat(56)) + '\n');
+        for (let i = 0; i < lastSubmenuLineCount + 1; i++) {
+          readline.clearLine(output, 0);
+          if (i < lastSubmenuLineCount) readline.moveCursor(output, 0, 1);
         }
 
-        // Re-show the prompt and buffer on the line after the popup
-        // Move cursor to the line after menu
         readline.cursorTo(output, 0);
-        readline.moveCursor(output, 0, lastMenuLineCount + 2); // +2 for the prompt line and status bar
+        readline.moveCursor(output, 0, - (lastSubmenuLineCount + 1));
+
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+        const title = submenuType === 'provider' ? '  SELECIONAR PROVIDER' : '  SELECIONAR MODELO';
+        output.write(chalk.bold.cyan(title) + '\n');
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+
+        let lineCount = 0;
+        submenuItems.forEach((item, idx) => {
+          if (idx === selectedSubmenuIndex) {
+            output.write(chalk.cyan(`    ▸ ${item}`) + '\n');
+          } else {
+            output.write(chalk.gray(`      ${item}`) + '\n');
+          }
+          lineCount++;
+        });
+        lastSubmenuLineCount = lineCount + 3;
+
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+        output.write(chalk.gray('  ↑/↓ navega  •  Enter seleciona  •  ESC/Q cancela') + '\n');
+        output.write(chalk.gray('─'.repeat(56)) + '\n');
+      }
+
+      // Re-show prompt
+      readline.cursorTo(output, 0);
+      readline.moveCursor(output, 0, lastSubmenuLineCount + 2);
+      readline.clearLine(output, 0);
+      const promptText = getPrompt(config.agent.defaultProvider, config.agent.defaultModel);
+      output.write(promptText + inputBuffer);
+    } else {
+      // Normal mode: if we were in command mode, clear the menu area
+      if (commandModeStarted) {
+        commandModeStarted = false;
+        readline.cursorTo(output, 0);
+        readline.moveCursor(output, 0, - (lastMenuLineCount + 1));
+        for (let i = 0; i < lastMenuLineCount + 1; i++) {
+          readline.clearLine(output, 0);
+          readline.cursorTo(output, 0);
+          if (i < lastMenuLineCount) readline.moveCursor(output, 0, 1);
+        }
+        readline.cursorTo(output, 0);
         readline.clearLine(output, 0);
         const promptText = getPrompt(config.agent.defaultProvider, config.agent.defaultModel);
         output.write(promptText + inputBuffer);
-      } else {
-        // Normal mode: if we were in command mode, clear the menu area
-        if (commandModeStarted) {
-          commandModeStarted = false;
-          // Clear the menu lines by moving up and clearing
-          readline.cursorTo(output, 0);
-          // Move up past the menu
-          readline.moveCursor(output, 0, - (lastMenuLineCount + 1));
-          for (let i = 0; i < lastMenuLineCount + 1; i++) {
-            readline.clearLine(output, 0);
-            readline.cursorTo(output, 0);
-            if (i < lastMenuLineCount) readline.moveCursor(output, 0, 1);
-          }
-          // Go back to prompt line
-          readline.cursorTo(output, 0);
-          readline.clearLine(output, 0);
-          const promptText = getPrompt(config.agent.defaultProvider, config.agent.defaultModel);
-          output.write(promptText + inputBuffer);
-        }
       }
-    };
+    }
+  };
 
   // Filter commands based on input buffer
   const filterCommands = (query: string) => {
@@ -319,7 +379,6 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
         selectedCommandIndex = Math.min(filteredCommands.length - 1, selectedCommandIndex + 1);
         renderLine();
       } else if (key === '\r' || key === '\n') { // Enter
-        // Select the command and exit command mode
         if (filteredCommands.length > 0) {
           const selectedCommand = filteredCommands[selectedCommandIndex].name;
           inputBuffer = selectedCommand;
@@ -327,73 +386,97 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
         inCommandMode = false;
         selectedCommandIndex = 0;
         renderLine();
-        // Simulate Enter to submit the line
         submitLine();
       } else if (key === '\u001b' || key === 'q') { // ESC or q
-        // Exit command mode
         inCommandMode = false;
         selectedCommandIndex = 0;
         inputBuffer = '';
         filterCommands('');
         renderLine();
       } else if (key === '\u007f' || key === '\b' || key === '\x08') { // Backspace
-              if (inputBuffer.length > 0) {
-                inputBuffer = inputBuffer.slice(0, -1);
-                filterCommands(inputBuffer);
-                renderLine();
-              } else {
-                // Exit command mode if buffer is empty
-                inCommandMode = false;
-                selectedCommandIndex = 0;
-                filterCommands('');
-                renderLine();
-              }
-      } else if (key.length === 1 && key >= ' ' && key <= '~') { // Printable ASCII characters
-              inputBuffer += key;
-              filterCommands(inputBuffer);
-              renderLine();
-            } else if (key.length > 0) {
-              // Handle non-ASCII characters (accented letters, etc.)
-              // In raw mode, these may come as multi-byte sequences
-              inputBuffer += key;
-              filterCommands(inputBuffer);
-              renderLine();
-            }
-          } else {
+        if (inputBuffer.length > 0) {
+          inputBuffer = inputBuffer.slice(0, -1);
+          filterCommands(inputBuffer);
+          renderLine();
+        } else {
+          inCommandMode = false;
+          selectedCommandIndex = 0;
+          filterCommands('');
+          renderLine();
+        }
+      } else if (key.length === 1 && key >= ' ' && key <= '~') { // Printable ASCII
+        inputBuffer += key;
+        filterCommands(inputBuffer);
+        renderLine();
+      } else if (key.length > 0) { // Non-ASCII characters
+        inputBuffer += key;
+        filterCommands(inputBuffer);
+        renderLine();
+      }
+    } else if (inSubmenuMode) {
+      // Handle submenu navigation
+      if (key === '\u001b[A' || key === 'k' || key === 'w') { // Up
+        selectedSubmenuIndex = Math.max(0, selectedSubmenuIndex - 1);
+        renderLine();
+      } else if (key === '\u001b[B' || key === 'j' || key === 's') { // Down
+        selectedSubmenuIndex = Math.min(submenuItems.length - 1, selectedSubmenuIndex + 1);
+        renderLine();
+      } else if (key === '\r' || key === '\n') { // Enter - select item
+        const selectedItem = submenuItems[selectedSubmenuIndex];
+        if (submenuType === 'provider') {
+          const providerName = selectedItem.split(' ')[0].replace(/^[0-9]+\.\s*/, '');
+          config.agent.defaultProvider = providerName;
+          console.log(chalk.green(`\n✓ Provider alterado para: ${providerName}`));
+        } else if (submenuType === 'model') {
+          const modelName = selectedItem.split(' ')[0].replace(/^[0-9]+\.\s*/, '').split(' (')[0];
+          config.agent.defaultModel = modelName;
+          console.log(chalk.green(`\n✓ Modelo alterado para: ${modelName}`));
+        }
+        inSubmenuMode = false;
+        submenuType = null;
+        submenuItems = [];
+        selectedSubmenuIndex = 0;
+        submenuStarted = false;
+        renderLine();
+      } else if (key === '\u001b' || key === 'q') { // ESC or q - cancel
+        inSubmenuMode = false;
+        submenuType = null;
+        submenuItems = [];
+        selectedSubmenuIndex = 0;
+        submenuStarted = false;
+        renderLine();
+      }
+    } else {
       // Handle normal mode
-      if (key === '\r') { // Enter (Carriage Return) - ignore \n (Line Feed) to prevent double submit
+      if (key === '\r') { // Enter
         submitLine();
       } else if (key === '\n') {
-        // Ignore Line Feed - already handled by Carriage Return in raw mode
+        // Ignore Line Feed
       } else if (key === '\u007f' || key === '\b' || key === '\x08') { // Backspace
         if (inputBuffer.length > 0) {
           inputBuffer = inputBuffer.slice(0, -1);
           renderLine();
         }
       } else if (key === '/') {
-              // Enter command mode when '/' is pressed
-              inCommandMode = true;
-              selectedCommandIndex = 0;
-              inputBuffer = '/';
-              filterCommands('/');
-              renderLine();
-            } else if (key.length === 1 && key >= ' ' && key <= '~') { // Printable ASCII characters
-              inputBuffer += key;
-              renderLine();
-            } else if (key.length > 0) {
-              // Handle non-ASCII characters (accented letters, etc.)
-              inputBuffer += key;
-              renderLine();
-            }
-            // Ignore other keys (like arrow keys in normal mode)
+        inCommandMode = true;
+        selectedCommandIndex = 0;
+        inputBuffer = '/';
+        filterCommands('/');
+        renderLine();
+      } else if (key.length === 1 && key >= ' ' && key <= '~') { // Printable ASCII
+        inputBuffer += key;
+        renderLine();
+      } else if (key.length > 0) { // Non-ASCII characters
+        inputBuffer += key;
+        renderLine();
+      }
     }
   };
 
-  // Function to submit the current line (simulate Enter)
+  // Function to submit the current line
   const submitLine = async () => {
     if (!isRunning) return;
 
-    // Move to next line after the prompt
     output.write('\n');
 
     const userInput = inputBuffer;
@@ -402,16 +485,14 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
     selectedCommandIndex = 0;
     filterCommands('');
 
-    // Process the input
     if (!userInput.trim()) {
-      // If empty, just re-prompt
       renderLine();
       return;
     }
 
     // Handle internal commands
     if (userInput.startsWith('/')) {
-      const handled = await handleCommand(userInput.trim(), config, messages);
+      const handled = await handleCommand(userInput.trim());
       if (handled === 'exit') {
         isRunning = false;
         stopStatusTimer();
@@ -420,7 +501,6 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
         console.log(chalk.gray('\nAté logo! 👋\n'));
         return;
       }
-      // After handling command, re-prompt
       renderLine();
       return;
     }
@@ -442,7 +522,6 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
       return;
     }
 
-    // Get provider config - should exist from config load
     const providerConfig = config.providers[config.agent.defaultProvider];
     if (!providerConfig) {
       console.log(chalk.red(`Configuration for provider ${config.agent.defaultProvider} not found`));
@@ -450,7 +529,6 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
       return;
     }
 
-    // Initialize adapter with config
     await adapter.initialize(providerConfig);
 
     // Stream response
@@ -479,9 +557,8 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
         if (chunk.choices[0]?.delta?.content) {
           const content = chunk.choices[0].delta.content;
           fullResponse += content;
-          tokensUsed += content.length / 4; // Rough token estimate
+          tokensUsed += content.length / 4;
           output.write(content);
-          // Don't call renderLine() here - let the timer update status bar
         }
 
         if (chunk.choices[0]?.delta?.toolCalls) {
@@ -501,7 +578,6 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
       isDone = true;
       stopStatusTimer();
 
-      // Add assistant message to history
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
@@ -511,10 +587,8 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
       };
       messages.push(assistantMessage);
 
-      // Show done state briefly, then reset
       renderLine();
 
-      // Reset done state after a short delay
       setTimeout(() => {
         if (isRunning) {
           isDone = false;
@@ -530,6 +604,157 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
       const errMsg = error instanceof Error ? error.message : String(error);
       output.write(chalk.red(`\nError: ${errMsg}\n`));
       renderLine();
+    }
+  };
+
+  // Handle internal commands (has access to submenu state via closure)
+  const handleCommand = async (command: string): Promise<string | void> => {
+    const parts = command.split(' ');
+    const cmd = parts[0].toLowerCase();
+
+    switch (cmd) {
+      case '/help':
+        console.log(getHelpText());
+        break;
+
+      case '/exit':
+        return 'exit';
+
+      case '/clear':
+        messages.length = 0;
+        console.log(chalk.green('✓ Histórico da conversa limpo'));
+        break;
+
+      case '/provider':
+        if (parts[1] === 'list') {
+          const providers = Object.keys(config.providers);
+          console.log(chalk.bold('\nProviders configurados:'));
+          for (const p of providers) {
+            const prov = config.providers[p];
+            const marker = p === config.agent.defaultProvider ? chalk.cyan(' ← atual') : '';
+            console.log(`  ${prov.enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(p)}${marker} (${prov.type}) - ${prov.defaultModel}`);
+          }
+        } else if (parts[1] === 'select') {
+          const providers = Object.keys(config.providers);
+          if (providers.length === 0) {
+            console.log(chalk.yellow('Nenhum provider configurado. Use codeles config wizard'));
+          } else {
+            inSubmenuMode = true;
+            submenuType = 'provider';
+            submenuItems = providers.map(p => {
+              const prov = config.providers[p];
+              const marker = p === config.agent.defaultProvider ? ' ← atual' : '';
+              return `${p} (${prov.type}) - ${prov.defaultModel}${marker}`;
+            });
+            selectedSubmenuIndex = providers.findIndex(p => p === config.agent.defaultProvider);
+            if (selectedSubmenuIndex === -1) selectedSubmenuIndex = 0;
+            submenuStarted = false;
+            renderLine();
+          }
+        } else if (parts[1] === 'add') {
+          console.log(chalk.yellow('Use: codeles config wizard para adicionar providers'));
+        } else if (parts[1] === 'remove') {
+          console.log(chalk.yellow('Use: codeles config wizard para remover providers'));
+        } else {
+          console.log(chalk.yellow('Uso: /provider list | select | add | remove'));
+        }
+        break;
+
+      case '/model':
+        if (parts[1] === 'list' || parts[1] === 'select') {
+          const adapter = providerRegistry.getAdapter(config.agent.defaultProvider);
+          if (adapter && typeof adapter.listModels === 'function') {
+            try {
+              const models = await adapter.listModels();
+              if (models && models.length > 0) {
+                inSubmenuMode = true;
+                submenuType = 'model';
+                submenuItems = models.map((m: any) => {
+                  const marker = m.id === config.agent.defaultModel ? ' ← atual' : '';
+                  const ctxInfo = m.contextWindow ? ` (${m.contextWindow.toLocaleString()} ctx)` : '';
+                  return `${m.id}${ctxInfo}${marker}`;
+                });
+                selectedSubmenuIndex = models.findIndex((m: any) => m.id === config.agent.defaultModel);
+                if (selectedSubmenuIndex === -1) selectedSubmenuIndex = 0;
+                submenuStarted = false;
+                renderLine();
+              } else {
+                console.log(chalk.gray('  Nenhum modelo disponível'));
+              }
+            } catch (error) {
+              console.log(chalk.gray('  Erro ao buscar modelos: ') + chalk.red(String(error)));
+              console.log(chalk.gray('  Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
+            }
+          } else {
+            const providerConfig = config.providers[config.agent.defaultProvider];
+            if (providerConfig && providerConfig.models && providerConfig.models.length > 0) {
+              inSubmenuMode = true;
+              submenuType = 'model';
+              submenuItems = providerConfig.models.map((m: any) => {
+                const marker = m.id === config.agent.defaultModel ? ' ← atual' : '';
+                return `${m.id}${marker}`;
+              });
+              selectedSubmenuIndex = providerConfig.models.findIndex((m: any) => m.id === config.agent.defaultModel);
+              if (selectedSubmenuIndex === -1) selectedSubmenuIndex = 0;
+              submenuStarted = false;
+              renderLine();
+            } else {
+              console.log(chalk.gray('  Nenhum modelo listado na configuração'));
+              console.log(chalk.gray('  Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
+            }
+          }
+        } else {
+          console.log(chalk.yellow('Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
+          console.log(chalk.gray('Comandos: /model list | /model select'));
+          console.log(chalk.gray('Para trocar: codeles chat --model <modelo>'));
+        }
+        break;
+
+      case '/tools':
+        if (parts[1] === 'enable' || parts[1] === 'disable') {
+          console.log(chalk.yellow('Use: codeles config wizard para gerenciar ferramentas'));
+        } else {
+          const tools = toolRegistry.listTools();
+          console.log(chalk.bold('\nFerramentas disponíveis:'));
+          for (const tool of tools) {
+            const enabled = config.tools[tool.name]?.enabled;
+            console.log(`  ${enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(tool.name)} - ${tool.description}`);
+          }
+        }
+        break;
+
+      case '/memory':
+        if (parts[1] === 'clear') {
+          const { createConfigManager } = await import('@codeles/core/config');
+          const manager = createConfigManager('default');
+          const cfg = await manager.load();
+          console.log(chalk.yellow('Memória limpa (funcionalidade a implementar)'));
+        } else {
+          const { createConfigManager } = await import('@codeles/core/config');
+          const manager = createConfigManager('default');
+          const cfg = await manager.load();
+          console.log(chalk.bold('\nMemória:'));
+          console.log(`  ${cfg.memory.enabled ? chalk.green('Ativada') : chalk.red('Desativada')}`);
+          console.log(`  Path: ${cfg.memory.path}`);
+          console.log(`  Max entries: ${cfg.memory.maxEntries}`);
+        }
+        break;
+
+      case '/config':
+        if (parts[1] === 'reset') {
+          console.log(chalk.yellow('Use: codeles config reset para resetar configuração'));
+        } else {
+          console.log(chalk.bold('\nConfiguração Atual:'));
+          console.log(`  Provider: ${chalk.cyan(config.agent.defaultProvider)}`);
+          console.log(`  Modelo: ${chalk.cyan(config.agent.defaultModel)}`);
+          console.log(`  Max Tokens: ${config.agent.maxTokens}`);
+          console.log(`  Temperature: ${config.agent.temperature}`);
+          console.log(`  System Prompt: ${config.agent.systemPrompt ? 'Definido' : 'Nenhum'}`);
+        }
+        break;
+
+      default:
+        console.log(chalk.yellow(`Comando desconhecido: ${cmd}. Use /help para ver comandos disponíveis.`));
     }
   };
 
@@ -553,7 +778,6 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
 }
 
 async function runSimpleMode(config: CodeLESConfig, messages: ChatMessage[]) {
-  // Read all input from stdin first (for piped input)
   const chunks: Buffer[] = [];
   for await (const chunk of input) {
     chunks.push(chunk);
@@ -565,20 +789,15 @@ async function runSimpleMode(config: CodeLESConfig, messages: ChatMessage[]) {
     return;
   }
 
-  // Split by lines and process each line
   const lines = allInput.split('\n').filter(line => line.trim() !== '');
 
   for (const userInput of lines) {
-    // Handle internal commands
     if (userInput.startsWith('/')) {
-      const handled = await handleCommand(userInput.trim(), config, messages);
-      if (handled === 'exit') {
-        break;
-      }
+      const handled = await handleSimpleCommand(userInput.trim(), config, messages);
+      if (handled === 'exit') break;
       continue;
     }
 
-    // Add user message
     const userMessage: ChatMessage = {
       id: `msg-${Date.now()}`,
       role: 'user',
@@ -587,24 +806,20 @@ async function runSimpleMode(config: CodeLESConfig, messages: ChatMessage[]) {
     };
     messages.push(userMessage);
 
-    // Get provider adapter
     const adapter = providerRegistry.getAdapter(config.agent.defaultProvider);
     if (!adapter) {
       console.log(chalk.red(`Provider ${config.agent.defaultProvider} not found`));
       continue;
     }
 
-    // Get provider config - should exist from config load
     const providerConfig = config.providers[config.agent.defaultProvider];
     if (!providerConfig) {
       console.log(chalk.red(`Configuration for provider ${config.agent.defaultProvider} not found`));
       continue;
     }
 
-    // Initialize adapter with config
     await adapter.initialize(providerConfig);
 
-    // Stream response
     let fullResponse = '';
     let hasToolCalls = false;
     let toolCalls: ToolCall[] = [];
@@ -631,14 +846,11 @@ async function runSimpleMode(config: CodeLESConfig, messages: ChatMessage[]) {
           toolCalls = chunk.choices[0].delta.toolCalls;
         }
 
-        if (chunk.choices[0]?.finishReason) {
-          // Response complete
-        }
+        if (chunk.choices[0]?.finishReason) {}
       }
 
       output.write('\n');
 
-      // Add assistant message to history
       const assistantMessage: ChatMessage = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
@@ -657,7 +869,8 @@ async function runSimpleMode(config: CodeLESConfig, messages: ChatMessage[]) {
   console.log(chalk.gray('\nAté logo! 👋\n'));
 }
 
-async function handleCommand(command: string, config: CodeLESConfig, messages: ChatMessage[]): Promise<string | void> {
+// Separate handler for simple mode (no submenu support)
+async function handleSimpleCommand(command: string, config: CodeLESConfig, messages: ChatMessage[]): Promise<string | void> {
   const parts = command.split(' ');
   const cmd = parts[0].toLowerCase();
 
@@ -675,133 +888,53 @@ async function handleCommand(command: string, config: CodeLESConfig, messages: C
       break;
 
     case '/provider':
-          if (parts[1] === 'list') {
-            const providers = Object.keys(config.providers);
-            console.log(chalk.bold('\nProviders configurados:'));
-            for (const p of providers) {
-              const prov = config.providers[p];
-              const marker = p === config.agent.defaultProvider ? chalk.cyan(' →') : '';
-              console.log(`  ${prov.enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(p)}${marker} (${prov.type}) - ${prov.defaultModel}`);
-            }
-          } else if (parts[1] === 'select') {
-            await selectProvider(config);
-          } else if (parts[1] === 'add') {
-            console.log(chalk.yellow('Use: codeles config wizard para adicionar providers'));
-          } else if (parts[1] === 'remove') {
-            console.log(chalk.yellow('Use: codeles config wizard para remover providers'));
-          } else {
-            console.log(chalk.yellow('Uso: /provider list | select | add | remove'));
-          }
-          break;
+      if (parts[1] === 'list') {
+        const providers = Object.keys(config.providers);
+        console.log(chalk.bold('\nProviders configurados:'));
+        for (const p of providers) {
+          const prov = config.providers[p];
+          const marker = p === config.agent.defaultProvider ? chalk.cyan(' ← atual') : '';
+          console.log(`  ${prov.enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(p)}${marker} (${prov.type}) - ${prov.defaultModel}`);
+        }
+      } else {
+        console.log(chalk.yellow('Uso: /provider list'));
+      }
+      break;
 
-        case '/model':
-          if (parts[1] === 'list' || parts[1] === 'select') {
-            await selectModel(config);
-          } else {
-            console.log(chalk.yellow('Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
-            console.log(chalk.gray('Comandos: /model list | /model select'));
-            console.log(chalk.gray('Para trocar: codeles chat --model <modelo>'));
-          }
-          break;
+    case '/model':
+      console.log(chalk.yellow('Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
+      console.log(chalk.gray('Para trocar: codeles chat --model <modelo>'));
+      break;
 
     case '/tools':
-      if (parts[1] === 'enable' || parts[1] === 'disable') {
-        console.log(chalk.yellow('Use: codeles config wizard para gerenciar ferramentas'));
-      } else {
-        const tools = toolRegistry.listTools();
-        console.log(chalk.bold('\nFerramentas disponíveis:'));
-        for (const tool of tools) {
-          const enabled = config.tools[tool.name]?.enabled;
-          console.log(`  ${enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(tool.name)} - ${tool.description}`);
-        }
+      const tools = toolRegistry.listTools();
+      console.log(chalk.bold('\nFerramentas disponíveis:'));
+      for (const tool of tools) {
+        const enabled = config.tools[tool.name]?.enabled;
+        console.log(`  ${enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(tool.name)} - ${tool.description}`);
       }
       break;
 
     case '/memory':
-      if (parts[1] === 'clear') {
-        const { createConfigManager } = await import('@codeles/core/config');
-        const manager = createConfigManager('default');
-        const cfg = await manager.load();
-        // Would need to implement memory clearing
-        console.log(chalk.yellow('Memória limpa (funcionalidade a implementar)'));
-      } else {
-        const { createConfigManager } = await import('@codeles/core/config');
-        const manager = createConfigManager('default');
-        const cfg = await manager.load();
-        console.log(chalk.bold('\nMemória:'));
-        console.log(`  ${cfg.memory.enabled ? chalk.green('Ativada') : chalk.red('Desativada')}`);
-        console.log(`  Path: ${cfg.memory.path}`);
-        console.log(`  Max entries: ${cfg.memory.maxEntries}`);
-      }
+      const { createConfigManager } = await import('@codeles/core/config');
+      const manager = createConfigManager('default');
+      const cfg = await manager.load();
+      console.log(chalk.bold('\nMemória:'));
+      console.log(`  ${cfg.memory.enabled ? chalk.green('Ativada') : chalk.red('Desativada')}`);
+      console.log(`  Path: ${cfg.memory.path}`);
+      console.log(`  Max entries: ${cfg.memory.maxEntries}`);
       break;
 
     case '/config':
-      if (parts[1] === 'reset') {
-        console.log(chalk.yellow('Use: codeles config reset para resetar configuração'));
-      } else {
-        console.log(chalk.bold('\nConfiguração Atual:'));
-        console.log(`  Provider: ${chalk.cyan(config.agent.defaultProvider)}`);
-        console.log(`  Modelo: ${chalk.cyan(config.agent.defaultModel)}`);
-        console.log(`  Max Tokens: ${config.agent.maxTokens}`);
-        console.log(`  Temperature: ${config.agent.temperature}`);
-        console.log(`  System Prompt: ${config.agent.systemPrompt ? 'Definido' : 'Nenhum'}`);
-      }
+      console.log(chalk.bold('\nConfiguração Atual:'));
+      console.log(`  Provider: ${chalk.cyan(config.agent.defaultProvider)}`);
+      console.log(`  Modelo: ${chalk.cyan(config.agent.defaultModel)}`);
+      console.log(`  Max Tokens: ${config.agent.maxTokens}`);
+      console.log(`  Temperature: ${config.agent.temperature}`);
+      console.log(`  System Prompt: ${config.agent.systemPrompt ? 'Definido' : 'Nenhum'}`);
       break;
 
     default:
-          console.log(chalk.yellow(`Comando desconhecido: ${cmd}. Use /help para ver comandos disponíveis.`));
-      }
-    }
-
-    async function selectProvider(config: CodeLESConfig): Promise<void> {
-      const providers = Object.keys(config.providers);
-      if (providers.length === 0) {
-        console.log(chalk.yellow('Nenhum provider configurado. Use /provider add ou codeles config wizard'));
-        return;
-      }
-
-      console.log(chalk.bold('\nProviders configurados:'));
-      providers.forEach((p, i) => {
-        const prov = config.providers[p];
-        const marker = p === config.agent.defaultProvider ? chalk.cyan(' ← atual') : '';
-        console.log(`  ${i + 1}. ${prov.enabled ? chalk.green('●') : chalk.red('○')} ${chalk.cyan(p)}${marker} (${prov.type}) - ${prov.defaultModel}`);
-      });
-
-      console.log(chalk.gray('\nUse: codeles chat --provider <nome> para trocar'));
-      console.log(chalk.gray('Ou edite a configuração: codeles config wizard'));
-    }
-
-    async function selectModel(config: CodeLESConfig): Promise<void> {
-      console.log(chalk.bold('\nModelos disponíveis para ' + chalk.cyan(config.agent.defaultProvider) + ':'));
-
-      const adapter = providerRegistry.getAdapter(config.agent.defaultProvider);
-      if (adapter && typeof adapter.listModels === 'function') {
-        try {
-          const models = await adapter.listModels();
-          if (models && models.length > 0) {
-            models.forEach((m: any, i: number) => {
-              const marker = m.id === config.agent.defaultModel ? chalk.cyan(' ← atual') : '';
-              const ctxInfo = m.contextWindow ? chalk.gray(` (${m.contextWindow.toLocaleString()} ctx)`) : '';
-              console.log(`  ${i + 1}. ${chalk.cyan(m.id)}${ctxInfo}${marker}`);
-            });
-          } else {
-            console.log(chalk.gray('  Nenhum modelo disponível'));
-          }
-        } catch (error) {
-          console.log(chalk.gray('  Erro ao buscar modelos: ') + chalk.red(String(error)));
-          console.log(chalk.gray('  Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
-        }
-      } else {
-        const providerConfig = config.providers[config.agent.defaultProvider];
-        if (providerConfig && providerConfig.models && providerConfig.models.length > 0) {
-          providerConfig.models.forEach((m: any, i: number) => {
-            const marker = m.id === config.agent.defaultModel ? chalk.cyan(' ← atual') : '';
-            console.log(`  ${i + 1}. ${chalk.cyan(m.id)}${marker}`);
-          });
-        } else {
-          console.log(chalk.gray('  Nenhum modelo listado na configuração'));
-          console.log(chalk.gray('  Modelo atual: ') + chalk.cyan(config.agent.defaultModel));
-        }
-      }
-      console.log(chalk.gray('\nUse: codeles chat --model <modelo> para trocar'));
-    }
+      console.log(chalk.yellow(`Comando desconhecido: ${cmd}. Use /help para ver comandos disponíveis.`));
+  }
+}
