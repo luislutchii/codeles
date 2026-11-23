@@ -132,142 +132,160 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
   };
 
   // Track rendered lines for efficient updates
-  let menuRendered = false;
-  let lastMenuLineCount = 0;
+    let menuRendered = false;
+    let lastMenuLineCount = 0;
+    let isFirstRender = true;
 
-  // Function to render the prompt, status bar, and current input
-  const renderLine = () => {
-    // Calculate session elapsed time
-    const sessionElapsedMs = Date.now() - sessionStartTime;
+    // Function to render the prompt, status bar, and current input
+    const renderLine = () => {
+      // Calculate session elapsed time
+      const sessionElapsedMs = Date.now() - sessionStartTime;
 
-    // Calculate response elapsed time
-    let responseElapsedMs = 0;
-    if (isResponding && responseStartTime > 0) {
-      responseElapsedMs = Date.now() - responseStartTime;
-    }
-
-    // Show status bar (Hermes-style)
-    const statusBar = getStatusBar({
-      model: config.agent.defaultModel,
-      tokensUsed,
-      tokensMax,
-      toolsCount,
-      sessionElapsedMs,
-      responseElapsedMs,
-      isResponding,
-      isDone
-    });
-
-    // Clear current line and move to beginning
-    readline.cursorTo(output, 0);
-    readline.clearLine(output, 0);
-    output.write(statusBar + '\n');
-
-    // Show prompt
-    const promptText = getPrompt(config.agent.defaultProvider, config.agent.defaultModel);
-    output.write(promptText);
-
-    if (inCommandMode) {
-      if (!commandModeStarted) {
-        // First time entering command mode - render full menu
-        commandModeStarted = true;
-        output.write('\n');
-        output.write(chalk.gray('─'.repeat(56)) + '\n');
-        output.write(chalk.bold.cyan('  COMANDOS DISPONÍVEIS') + '\n');
-        output.write(chalk.gray('─'.repeat(56)) + '\n');
-
-        // Group by category
-        const categories = [...new Set(filteredCommands.map(c => c.category))];
-        let lineCount = 0;
-        categories.forEach((cat, catIdx) => {
-          const catCommands = filteredCommands.filter(c => c.category === cat);
-          output.write(chalk.gray(`  ${cat}:`) + '\n');
-          lineCount++;
-          catCommands.forEach((cmd, idx) => {
-            const globalIdx = filteredCommands.indexOf(cmd);
-            if (globalIdx === selectedCommandIndex) {
-              output.write(chalk.cyan(`    ▸ ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
-            } else {
-              output.write(chalk.gray(`      ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
-            }
-            lineCount++;
-          });
-        });
-        lastMenuLineCount = lineCount + 3; // category lines + command lines + separators
-
-        output.write(chalk.gray('─'.repeat(56)) + '\n');
-        output.write(chalk.gray('  ↑/↓ navega  •  Enter seleciona  •  ESC/Q cancela') + '\n');
-        output.write(chalk.gray('─'.repeat(56)) + '\n');
-      } else {
-        // Re-render menu by moving cursor up and clearing menu area
-        // Move cursor up to the line after status bar (menu starts 2 lines after status bar)
-        readline.cursorTo(output, 0);
-        readline.moveCursor(output, 0, - (lastMenuLineCount + 2)); // -2 for prompt line and status bar
-
-        // Clear menu lines
-        for (let i = 0; i < lastMenuLineCount + 2; i++) {
-          readline.clearLine(output, 0);
-          if (i < lastMenuLineCount + 1) readline.moveCursor(output, 0, 1);
-        }
-
-        // Go back to menu start
-        readline.cursorTo(output, 0);
-        readline.moveCursor(output, 0, - (lastMenuLineCount + 2));
-
-        // Re-render menu
-        output.write(chalk.gray('─'.repeat(56)) + '\n');
-        output.write(chalk.bold.cyan('  COMANDOS DISPONÍVEIS') + '\n');
-        output.write(chalk.gray('─'.repeat(56)) + '\n');
-
-        let lineCount = 0;
-        const categories = [...new Set(filteredCommands.map(c => c.category))];
-        categories.forEach((cat, catIdx) => {
-          const catCommands = filteredCommands.filter(c => c.category === cat);
-          output.write(chalk.gray(`  ${cat}:`) + '\n');
-          lineCount++;
-          catCommands.forEach((cmd, idx) => {
-            const globalIdx = filteredCommands.indexOf(cmd);
-            if (globalIdx === selectedCommandIndex) {
-              output.write(chalk.cyan(`    ▸ ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
-            } else {
-              output.write(chalk.gray(`      ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
-            }
-            lineCount++;
-          });
-        });
-        lastMenuLineCount = lineCount + 3;
-
-        output.write(chalk.gray('─'.repeat(56)) + '\n');
-        output.write(chalk.gray('  ↑/↓ navega  •  Enter seleciona  •  ESC/Q cancela') + '\n');
-        output.write(chalk.gray('─'.repeat(56)) + '\n');
+      // Calculate response elapsed time
+      let responseElapsedMs = 0;
+      if (isResponding && responseStartTime > 0) {
+        responseElapsedMs = Date.now() - responseStartTime;
       }
 
-      // Re-show the prompt and buffer on the line after the popup
-      output.write(promptText + inputBuffer);
-    } else {
-      // Normal mode: show current input
-      if (commandModeStarted) {
-        // We were in command mode, need to clear the menu area
-        commandModeStarted = false;
-        // Clear the menu lines by moving up and clearing
-        readline.cursorTo(output, 0);
-        // Move up past the menu
-        readline.moveCursor(output, 0, - (lastMenuLineCount + 3));
-        for (let i = 0; i < lastMenuLineCount + 3; i++) {
-          readline.clearLine(output, 0);
-          readline.cursorTo(output, 0);
-          if (i < lastMenuLineCount + 2) readline.moveCursor(output, 0, 1);
-        }
-        // Go back to prompt line
-        readline.cursorTo(output, 0);
-        readline.clearLine(output, 0);
+      // Show status bar (Hermes-style)
+      const statusBar = getStatusBar({
+        model: config.agent.defaultModel,
+        tokensUsed,
+        tokensMax,
+        toolsCount,
+        sessionElapsedMs,
+        responseElapsedMs,
+        isResponding,
+        isDone
+      });
+
+      if (isFirstRender) {
+        // First render: write status bar and prompt
         output.write(statusBar + '\n');
+        isFirstRender = false;
+      } else {
+        // Update in-place: move cursor up to status bar line and clear it
+        // Status bar is at a fixed position relative to current cursor
+        // We need to move up past prompt line, menu (if any), then update status bar
+        const linesToMoveUp = 1; // move up from prompt line to status bar line
+        readline.cursorTo(output, 0);
+        readline.moveCursor(output, 0, -linesToMoveUp);
+        readline.clearLine(output, 0);
+        output.write(statusBar);
+        // Move cursor back down to prompt line
+        readline.cursorTo(output, 0);
+        readline.moveCursor(output, 0, linesToMoveUp);
+      }
+
+      // Show prompt - clear current line and write prompt + buffer
+      readline.cursorTo(output, 0);
+      readline.clearLine(output, 0);
+      const promptText = getPrompt(config.agent.defaultProvider, config.agent.defaultModel);
+      output.write(promptText + inputBuffer);
+
+      if (inCommandMode) {
+        if (!commandModeStarted) {
+          // First time entering command mode - render full menu below prompt
+          commandModeStarted = true;
+          output.write('\n');
+          output.write(chalk.gray('─'.repeat(56)) + '\n');
+          output.write(chalk.bold.cyan('  COMANDOS DISPONÍVEIS') + '\n');
+          output.write(chalk.gray('─'.repeat(56)) + '\n');
+
+          // Group by category
+          const categories = [...new Set(filteredCommands.map(c => c.category))];
+          let lineCount = 0;
+          categories.forEach((cat, catIdx) => {
+            const catCommands = filteredCommands.filter(c => c.category === cat);
+            output.write(chalk.gray(`  ${cat}:`) + '\n');
+            lineCount++;
+            catCommands.forEach((cmd, idx) => {
+              const globalIdx = filteredCommands.indexOf(cmd);
+              if (globalIdx === selectedCommandIndex) {
+                output.write(chalk.cyan(`    ▸ ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
+              } else {
+                output.write(chalk.gray(`      ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
+              }
+              lineCount++;
+            });
+          });
+          lastMenuLineCount = lineCount + 3; // category lines + command lines + separators
+
+          output.write(chalk.gray('─'.repeat(56)) + '\n');
+          output.write(chalk.gray('  ↑/↓ navega  •  Enter seleciona  •  ESC/Q cancela') + '\n');
+          output.write(chalk.gray('─'.repeat(56)) + '\n');
+        } else {
+          // Re-render menu by moving cursor up and clearing menu area
+          // Move cursor up to the line after prompt (menu starts 1 line after prompt)
+          readline.cursorTo(output, 0);
+          readline.moveCursor(output, 0, - (lastMenuLineCount + 1)); // -1 for prompt line
+
+          // Clear menu lines
+          for (let i = 0; i < lastMenuLineCount + 1; i++) {
+            readline.clearLine(output, 0);
+            if (i < lastMenuLineCount) readline.moveCursor(output, 0, 1);
+          }
+
+          // Go back to menu start (line after prompt)
+          readline.cursorTo(output, 0);
+          readline.moveCursor(output, 0, - (lastMenuLineCount + 1));
+
+          // Re-render menu
+          output.write(chalk.gray('─'.repeat(56)) + '\n');
+          output.write(chalk.bold.cyan('  COMANDOS DISPONÍVEIS') + '\n');
+          output.write(chalk.gray('─'.repeat(56)) + '\n');
+
+          let lineCount = 0;
+          const categories = [...new Set(filteredCommands.map(c => c.category))];
+          categories.forEach((cat, catIdx) => {
+            const catCommands = filteredCommands.filter(c => c.category === cat);
+            output.write(chalk.gray(`  ${cat}:`) + '\n');
+            lineCount++;
+            catCommands.forEach((cmd, idx) => {
+              const globalIdx = filteredCommands.indexOf(cmd);
+              if (globalIdx === selectedCommandIndex) {
+                output.write(chalk.cyan(`    ▸ ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
+              } else {
+                output.write(chalk.gray(`      ${cmd.name}`) + chalk.gray(` - ${cmd.description}`) + '\n');
+              }
+              lineCount++;
+            });
+          });
+          lastMenuLineCount = lineCount + 3;
+
+          output.write(chalk.gray('─'.repeat(56)) + '\n');
+          output.write(chalk.gray('  ↑/↓ navega  •  Enter seleciona  •  ESC/Q cancela') + '\n');
+          output.write(chalk.gray('─'.repeat(56)) + '\n');
+        }
+
+        // Re-show the prompt and buffer on the line after the popup
+        // Move cursor to the line after menu
+        readline.cursorTo(output, 0);
+        readline.moveCursor(output, 0, lastMenuLineCount + 2); // +2 for the prompt line and status bar
+        readline.clearLine(output, 0);
+        const promptText = getPrompt(config.agent.defaultProvider, config.agent.defaultModel);
         output.write(promptText + inputBuffer);
       } else {
-        output.write(inputBuffer);
+        // Normal mode: if we were in command mode, clear the menu area
+        if (commandModeStarted) {
+          commandModeStarted = false;
+          // Clear the menu lines by moving up and clearing
+          readline.cursorTo(output, 0);
+          // Move up past the menu
+          readline.moveCursor(output, 0, - (lastMenuLineCount + 1));
+          for (let i = 0; i < lastMenuLineCount + 1; i++) {
+            readline.clearLine(output, 0);
+            readline.cursorTo(output, 0);
+            if (i < lastMenuLineCount) readline.moveCursor(output, 0, 1);
+          }
+          // Go back to prompt line
+          readline.cursorTo(output, 0);
+          readline.clearLine(output, 0);
+          const promptText = getPrompt(config.agent.defaultProvider, config.agent.defaultModel);
+          output.write(promptText + inputBuffer);
+        }
       }
-    }
-  };
+    };
 
   // Filter commands based on input buffer
   const filterCommands = (query: string) => {
