@@ -104,7 +104,7 @@ export function getStatusBar(options: {
   const statusLabel = isDone ? chalk.green('CONCLUÍDO') : (isResponding ? chalk.yellow('RESPONDENDO') : chalk.gray('AGUARDANDO'));
   
   // Tools emoji - use text fallback for compatibility
-  const toolsIcon = '🛠';
+  const toolsIcon = 'TLS';
   
   if (isResponding || isDone) {
     // Durante ou após resposta: mostra tokens, tempo de resposta, session time
