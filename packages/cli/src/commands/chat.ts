@@ -319,17 +319,23 @@ async function runInteractiveMode(config: CodeLESConfig, messages: ChatMessage[]
         filterCommands('');
         renderLine();
       } else if (key === '\u007f' || key === '\b' || key === '\x08') { // Backspace
-        if (inputBuffer.length > 0) {
-          inputBuffer = inputBuffer.slice(0, -1);
-          filterCommands(inputBuffer);
-          renderLine();
-        } else {
-          // Exit command mode if buffer is empty
-          inCommandMode = false;
-          selectedCommandIndex = 0;
-          filterCommands('');
-          renderLine();
-        }
+              if (inputBuffer.length > 0) {
+                inputBuffer = inputBuffer.slice(0, -1);
+                filterCommands(inputBuffer);
+                // Exit command mode if buffer is empty or no longer starts with "/"
+                if (inputBuffer.length === 0 || !inputBuffer.startsWith('/')) {
+                  inCommandMode = false;
+                  selectedCommandIndex = 0;
+                  filterCommands('');
+                }
+                renderLine();
+              } else {
+                // Exit command mode if buffer is empty
+                inCommandMode = false;
+                selectedCommandIndex = 0;
+                filterCommands('');
+                renderLine();
+              }
       } else if (key.length === 1 && key >= ' ' && key <= '~') { // Printable characters
         inputBuffer += key;
         filterCommands(inputBuffer);
